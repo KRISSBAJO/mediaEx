@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { FIELD_TYPE_LABEL, normaliseTag } from '@/lib/media/types'
 import Icon from '../Icon'
 import { flatTree, useLibrary } from '../library'
@@ -20,7 +21,8 @@ export function Dialog({ title, sub, onClose, children, foot, onSubmit, wide }: 
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
   }, [onClose])
-  return (
+  // rendered into <body>: inside the page, the sticky top bar would paint over it on phones
+  return createPortal(
     <div className="dialog-scrim" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
       <form
         className={`dialog ${wide ? 'dialog-wide' : ''}`}
@@ -37,7 +39,8 @@ export function Dialog({ title, sub, onClose, children, foot, onSubmit, wide }: 
         {children && <div className="dialog-body">{children}</div>}
         <div className="dialog-foot">{foot}</div>
       </form>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

@@ -208,28 +208,7 @@ export const ACTIVITY: Activity[] = [
   { who: 'Sam Osei', what: 'created API key', target: 'ci-deploy', when: 'Yesterday' },
 ]
 
-/* ------------------------------------------------ developers + team */
-export const API_KEYS = [
-  { id: 'k1', name: 'production-web', prefix: 'mx_live_', last4: '3f2a', created: 'Aug 2', lastUsed: '2 min ago', scope: 'Full access' },
-  { id: 'k2', name: 'ci-deploy', prefix: 'mx_live_', last4: '91c0', created: 'Nov 18', lastUsed: '6 hr ago', scope: 'Upload only' },
-  { id: 'k3', name: 'analytics-export', prefix: 'mx_live_', last4: 'b7e4', created: 'Jun 11', lastUsed: '3 days ago', scope: 'Read only' },
-  { id: 'k4', name: 'local-dev', prefix: 'mx_test_', last4: '0d19', created: 'Oct 29', lastUsed: 'Never', scope: 'Full access' },
-]
-
-export const WEBHOOKS = [
-  { id: 'w1', url: 'https://api.northwind.studio/hooks/mediaex', events: ['asset.ready', 'asset.failed'], status: 'healthy' as const, success: 99.8 },
-  { id: 'w2', url: 'https://hooks.slack.com/services/T0…/B0…', events: ['asset.failed'], status: 'healthy' as const, success: 100 },
-  { id: 'w3', url: 'https://staging.northwind.studio/hooks', events: ['upload.completed', 'asset.ready'], status: 'failing' as const, success: 71.4 },
-]
-
-export const DELIVERIES = [
-  { id: 'evt_9a1c', event: 'asset.ready', code: 200, ms: 142, when: '4 min ago' },
-  { id: 'evt_9a1b', event: 'upload.completed', code: 503, ms: 10000, when: '9 min ago' },
-  { id: 'evt_9a19', event: 'asset.ready', code: 200, ms: 118, when: '22 min ago' },
-  { id: 'evt_9a17', event: 'asset.failed', code: 200, ms: 131, when: '2 hr ago' },
-  { id: 'evt_9a12', event: 'upload.completed', code: 200, ms: 97, when: '3 hr ago' },
-]
-
+/* ------------------------------------------------ team */
 export const MEMBERS = [
   { name: 'Ada Okafor', email: 'ada@northwind.studio', role: 'Owner', initials: 'AO', active: 'Now' },
   { name: 'Jordan Reyes', email: 'jordan@northwind.studio', role: 'Admin', initials: 'JR', active: '22 min ago' },

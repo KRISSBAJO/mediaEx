@@ -5,6 +5,8 @@ import MotionRoot from '@/components/MotionRoot'
 import Pricing from '@/components/Pricing'
 import Footer from '@/components/Footer'
 import Timecode from '@/components/Timecode'
+import Pipeline from '@/components/Pipeline'
+import DevConsole from '@/components/DevConsole'
 
 const BRANDS = ['Northwind Studios', 'Lumen Pictures', 'Kairo Audio', 'Halcyon', 'Driftwave', 'Orbit FM', 'Paperplane', 'Nightjar Films', 'Atlas Sports', 'Mono/Poly']
 
@@ -49,13 +51,6 @@ function SectionHead({
   )
 }
 
-function CellTag({ n, t }: { n: string; t: string }) {
-  return (
-    <span className="cell-tag">
-      <b>{n}</b> {t}
-    </span>
-  )
-}
 
 export default function Home() {
   return (
@@ -88,7 +83,7 @@ export default function Home() {
             <h1 className="hero-title hero-anim" style={d(250)}>
               Upload once.
               <br />
-              Stream everywhere.
+              <span className="grad-text">Stream everywhere.</span>
             </h1>
             <div className="hero-aside hero-anim" style={d(400)}>
               <p>
@@ -128,130 +123,17 @@ export default function Home() {
           <SectionHead
             index="01"
             label="Platform"
-            note="Six capabilities, one pipeline"
+            note="One file, six stops"
             title={
               <>
-                One home for every frame, <span className="grad-text">track and pixel.</span>
+                Drop in a file. <span className="grad-text">Get back a media platform.</span>
               </>
             }
           >
-            From the first upload to the last viewer, MediaEX handles the heavy lifting so you can stay in the creative flow.
+            Everything after the upload — encoding, transforms, organising, review and delivery — runs in one pipeline you can watch,
+            script and trust.
           </SectionHead>
-
-          <div className="grid-ruled bento">
-            <article className="cell b-upload" data-reveal style={d(0)}>
-              <CellTag n="01" t="Ingest" />
-              <div className="viz viz-upload">
-                {[
-                  ['MOV', 'launch_film_final.mov', '8.4 GB · ProRes 4444'],
-                  ['WAV', 'podcast_ep_112.wav', '1.2 GB · 96 kHz'],
-                  ['RAW', 'campaign_stills.zip', '3.1 GB · 214 files'],
-                ].map(([ext, name, meta], i) => (
-                  <div key={name} className="file" style={d(i * 600)}>
-                    <span className="file-ext">{ext}</span>
-                    <div className="file-body">
-                      <div className="file-row">
-                        <b>{name}</b>
-                        <span>{meta}</span>
-                      </div>
-                      <div className="bar">
-                        <i />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <h3>Drag. Drop. Done.</h3>
-              <p>Resumable uploads up to 5 TB per file. 8K RAW, ProRes, FLAC, HEIC — if it plays, MediaEX takes it.</p>
-            </article>
-
-            <article className="cell b-transcode" data-reveal style={d(80)}>
-              <CellTag n="02" t="Encode" />
-              <div className="viz viz-codecs">
-                {['AV1', 'HEVC', 'H.264', 'VP9', 'ProRes', 'Opus', 'AAC', 'WebP'].map((c, i) => (
-                  <span key={c} style={d(i * 350)}>
-                    {c}
-                  </span>
-                ))}
-              </div>
-              <h3>Smart transcoding</h3>
-              <p>Per-title encoding picks the best ladder for every asset. Up to 50% smaller at the same quality.</p>
-            </article>
-
-            <article className="cell b-edge" data-reveal style={d(0)}>
-              <CellTag n="03" t="Deliver" />
-              <div className="viz viz-map">
-                {[
-                  [18, 38],
-                  [27, 30],
-                  [47, 28],
-                  [52, 46],
-                  [70, 34],
-                  [80, 60],
-                  [34, 66],
-                  [62, 70],
-                ].map(([x, y], i) => (
-                  <span key={i} className="pop" style={{ left: `${x}%`, top: `${y}%`, ...d(i * 420) }} />
-                ))}
-                <span className="viz-note">190+ PoPs</span>
-              </div>
-              <h3>Global edge streaming</h3>
-              <p>Adaptive HLS and DASH from 190+ locations, with a median start time of 38 ms.</p>
-            </article>
-
-            <article className="cell b-ai" data-reveal style={d(80)}>
-              <CellTag n="04" t="Understand" />
-              <div className="viz viz-ai">
-                <div className="frame">
-                  <span className="scene-tag">SC 04 · Beach · Dusk</span>
-                  <div className="caption">
-                    <span>&quot;We finally made it to the coast.&quot;</span>
-                  </div>
-                </div>
-                <div className="langs">
-                  {['EN', 'ES', 'JA', 'DE', 'PT', 'HI', '+34'].map((l) => (
-                    <span key={l}>{l}</span>
-                  ))}
-                </div>
-              </div>
-              <h3>AI Studio</h3>
-              <p>Captions in 40+ languages, scene detection, smart thumbnails and search that knows what is on screen.</p>
-            </article>
-
-            <article className="cell b-review" data-reveal style={d(0)}>
-              <CellTag n="05" t="Review" />
-              <div className="viz viz-review">
-                <div className="avatars">
-                  {['AK', 'JR', 'ML', 'SO'].map((a) => (
-                    <span key={a}>{a}</span>
-                  ))}
-                </div>
-                <div className="timeline">
-                  <i className="playhead" />
-                  {[14, 38, 61, 83].map((x, i) => (
-                    <b key={x} style={{ left: `${x}%`, ...d(i * 300) }} />
-                  ))}
-                </div>
-                <div className="comment">
-                  <span>ML</span>
-                  <em>00:00:42:06</em> Tighten this cut by 6 frames?
-                </div>
-              </div>
-              <h3>Review &amp; approve</h3>
-              <p>Frame-accurate comments, version stacks and one-click approvals your clients will actually use.</p>
-            </article>
-
-            <article className="cell b-analytics" data-reveal style={d(80)}>
-              <CellTag n="06" t="Measure" />
-              <div className="viz viz-chart">
-                {[42, 58, 50, 72, 64, 86, 78, 94, 70, 88, 100, 92].map((h, i) => (
-                  <i key={i} style={{ ['--h' as string]: `${h}%`, ...d(i * 70) }} />
-                ))}
-              </div>
-              <h3>Real-time analytics</h3>
-              <p>Watch time, quality of experience and retention heatmaps, live as people press play.</p>
-            </article>
-          </div>
+          <Pipeline />
         </section>
 
         {/* ---------------- ENGINE ---------------- */}
@@ -343,69 +225,39 @@ export default function Home() {
           <SectionHead
             index="04"
             label="Developers"
-            note="REST · GraphQL · Webhooks"
+            note="REST · Webhooks · Transforms"
             title={
               <>
                 Ship video features <span className="grad-text">in an afternoon.</span>
               </>
             }
           >
-            A typed SDK, REST and GraphQL APIs, webhooks for every event and a drop-in player that works everywhere.
+            Everything the dashboard does, from your own code: scoped API keys, a REST API, signed webhooks and URL transforms.
           </SectionHead>
-          <div className="dev">
-            <div className="dev-copy" data-reveal>
-              <ul className="dev-list">
-                {[
-                  ['SDKs', 'Typed clients for JavaScript, Swift, Kotlin and Python.'],
-                  ['Security', 'Signed URLs, DRM and token auth on every plan.'],
-                  ['Webhooks', 'An event for every pipeline step, signed and retried.'],
-                  ['Player', 'Open source and themeable, on web, iOS and Android.'],
-                ].map(([t, x]) => (
-                  <li key={t}>
-                    <b>{t}</b>
-                    <span>{x}</span>
-                  </li>
-                ))}
-              </ul>
-              <a href="#pricing" className="link-arrow">
-                Read the docs <Arrow />
-              </a>
-            </div>
-            <div className="code" data-reveal style={d(120)}>
-              <div className="code-bar">
-                <span className="code-tab is-active">upload.ts</span>
-                <span className="code-tab">webhook.ts</span>
-                <span className="code-lang">TypeScript</span>
+          <div data-reveal>
+            <DevConsole />
+          </div>
+          <div className="dev-specs" data-reveal style={d(120)}>
+            {[
+              ['API keys', 'Scoped to read, upload or full access. Revoke any key instantly.', 'mx_live_••••'],
+              ['REST API', 'List, search, upload, edit and delete assets.', '/api/v1'],
+              ['Webhooks', 'Six asset events, signed and retried for a day.', 'HMAC-SHA256'],
+              ['Transforms', 'Any size, crop or format, straight from a URL.', '?w=1200&f=avif'],
+            ].map(([t, x, k]) => (
+              <div key={t} className="dev-spec">
+                <b>{t}</b>
+                <p>{x}</p>
+                <code>{k}</code>
               </div>
-              <pre>
-                <code>
-                  <span className="k">import</span> {'{ MediaEX }'} <span className="k">from</span> <span className="s">&apos;@mediaex/sdk&apos;</span>
-                  {'\n\n'}
-                  <span className="k">const</span> mx = <span className="k">new</span> <span className="f">MediaEX</span>({'{ '}apiKey: process.env.<span className="c2">MEDIAEX_KEY</span>
-                  {' })'}
-                  {'\n\n'}
-                  <span className="k">const</span> asset = <span className="k">await</span> mx.assets.<span className="f">upload</span>(<span className="s">&apos;./launch-film.mov&apos;</span>, {'{'}
-                  {'\n'}
-                  {'  '}renditions: [<span className="s">&apos;2160p&apos;</span>, <span className="s">&apos;1080p&apos;</span>, <span className="s">&apos;720p&apos;</span>],
-                  {'\n'}
-                  {'  '}codecs: [<span className="s">&apos;av1&apos;</span>, <span className="s">&apos;hevc&apos;</span>],
-                  {'\n'}
-                  {'  '}captions: {'{ '}auto: <span className="c2">true</span>, languages: [<span className="s">&apos;en&apos;</span>, <span className="s">&apos;es&apos;</span>, <span className="s">&apos;ja&apos;</span>]{' }'},
-                  {'\n'}
-                  {'})'}
-                  {'\n\n'}
-                  <span className="cm">{'// → https://play.mediaex.io/a8f2c91e'}</span>
-                  {'\n'}
-                  console.<span className="f">log</span>(asset.playbackUrl)
-                </code>
-              </pre>
-              <div className="code-out">
-                <span>
-                  <i className="ok" /> Ready in 41s
-                </span>
-                <span>8.4 GB · 3 renditions · 3 caption tracks</span>
-              </div>
-            </div>
+            ))}
+          </div>
+          <div className="dev-actions" data-reveal style={d(200)}>
+            <a href="/dashboard/developers" className="btn btn-primary">
+              Create an API key <Arrow />
+            </a>
+            <a href="/dashboard/developers" className="link-arrow">
+              Read the docs <Arrow />
+            </a>
           </div>
         </section>
 

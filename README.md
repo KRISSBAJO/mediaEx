@@ -58,6 +58,8 @@ The API image ships Node.js, the PostgreSQL-backed account service and the media
 | `MEDIA_WORKER` | `off` runs an API-only instance that doesn't encode |
 | `MAX_VARIANTS_PER_ASSET` | Cached transformation variants kept per asset (default 200) |
 | `ANTHROPIC_API_KEY` | Optional. Lets workspaces turn on automatic image review in moderation (Claude looks at images and video frames) |
+| `API_RATE_LIMIT_PER_MINUTE` | Requests per minute allowed for each API key on `/api/v1` (default 120) |
+| `PUBLIC_API_URL` | Optional. The origin API callers use, if it differs from `BETTER_AUTH_URL` (used in upload URLs handed to key callers) |
 
 Generate each secret separately with `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. Store production values in service secrets. Register OAuth callbacks at `<BETTER_AUTH_URL>/api/auth/callback/google` or `<BETTER_AUTH_URL>/api/auth/callback/github`.
 
@@ -159,6 +161,75 @@ before moderation was turned on stay approved.
 Known limits: one `PUT` per upload (no resumable/multipart yet, so 5 GB max); encoding is CPU-only H.264; captions,
 view analytics and signed playback URLs are not built yet.
 
+## Developer platform
+
+Everything the dashboard can do with media, a customer's own servers can do with an **API key**, and **webhooks** tell
+them when something happens. Both are managed on the dashboard's **Developers** page.
+
+### API keys
+
+- Keys look like `mx_live_` followed by 32 random base62 characters. The full key is shown once, when it's created;
+  the database stores only its SHA-256 hash and last four characters.
+- Each key belongs to a workspace and has a scope: `read` (list and read assets and folders), `upload` (read, plus
+  uploads) or `full` (everything, including edits and deletes).
+- Owners and admins create and revoke keys (`/api/keys`, up to 50 active per workspace); every member can see the list.
+  Revoking takes effect on the next request.
+- Each key is rate limited with a token bucket: `API_RATE_LIMIT_PER_MINUTE` requests a minute (default 120). Over the
+  limit, the API answers 429 with a `Retry-After` header. The bucket is kept in memory per backend instance.
+- Keys work only on `/api/v1`. A key sent to the dashboard routes, or a session cookie sent to `/api/v1`, is refused.
+
+### Public API: `/api/v1`
+
+Send `Authorization: Bearer mx_live_…` to the frontend origin, which forwards `/api/v1` to the backend.
+
+| Endpoint | Scope | Does |
+|---|---|---|
+| `GET /api/v1/whoami` | read | The key's workspace, name and scope |
+| `GET /api/v1/assets?q=&folder=&type=&status=&tags=&date=&sort=&limit=&offset=` | read | Search, same parameters as the Library; `limit` up to 100, `nextOffset` for the next page |
+| `GET /api/v1/assets/:id` | read | One asset |
+| `PATCH /api/v1/assets/:id` | full | `{ title?, tags?, folderId?, metadata? }` |
+| `DELETE /api/v1/assets/:id` | full | Deletes the asset and its files |
+| `POST /api/v1/assets/:id/retry` | full | Runs the pipeline again |
+| `POST /api/v1/uploads` | upload | `{ fileName, size, mimeType?, folderId? }` returns the asset and where to `PUT` the file |
+| `PUT /api/v1/uploads/:id` | upload | The file itself, when `upload.url` points here (local-disk storage); with a bucket it's a presigned URL instead |
+| `POST /api/v1/uploads/:id/complete` | upload | Checks the file arrived and queues it for processing |
+| `GET /api/v1/folders` | read | The workspace's folders with asset counts |
+
+Responses use the dashboard's asset shape, with absolute thumbnail, poster and playback URLs. Uploads made with a key
+show "API key: <name>" as their uploader. Errors are `{ "error": "…" }` with a matching status. The router is
+`backend/media/v1.mts`.
+
+### Webhooks
+
+Owners and admins add HTTPS endpoints (`/api/webhooks`, up to 20 per workspace) and pick the events they want:
+
+| Event | When |
+|---|---|
+| `asset.ready` | An upload finished processing and can stream |
+| `asset.failed` | Processing failed |
+| `asset.deleted` | An asset was deleted (the payload has the asset as it was) |
+| `asset.review_required` | Moderation is holding an upload for review |
+| `asset.approved`, `asset.rejected` | Someone decided on an asset in review |
+
+Each delivery is a `POST` with a JSON body `{ id: "evt_…", type, created, workspace, data: { asset } }` and these
+headers: `MediaEX-Event`, `MediaEX-Delivery` (the delivery ID) and
+`MediaEX-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" with the endpoint's secret>`. Receivers
+should recompute the HMAC over the raw body, compare in constant time and reject old timestamps. The Developers page
+has a ready-made Node snippet. Secrets (`whsec_…`) can be revealed and rotated.
+
+- **Delivery.** A 2xx answer within 10 seconds counts as delivered. Anything else (another status, a timeout, a
+  redirect) is retried after 30 s, 2 min, 10 min, 30 min, 1 h, 3 h, 6 h and 12 h, about a day in total, then the
+  delivery is marked failed. Deliveries are rows in Postgres claimed with `for update skip locked`, so retries survive
+  restarts and every backend instance helps send them.
+- **The log.** The Developers page lists the last 100 deliveries with the payload, your server's answer, a "send again"
+  button and a test event per endpoint (`webhook.test`). Each endpoint shows its health (consecutive failures) and a
+  7-day success count. A disabled endpoint gets no new deliveries.
+- **SSRF guard.** Endpoints must use HTTPS. In production, the host is resolved before every delivery and private,
+  loopback, link-local and CGNAT addresses are refused. In development, `http://localhost` is allowed so you can test
+  against a local receiver.
+
+The code is in `backend/media/webhooks.mts` (endpoints, signing, dispatcher, `emitAsset`) and `backend/media/keys.mts`.
+
 ## What's where
 
 - `app/page.tsx`, `components/` — the landing page (hero, sections, nav, footer)
@@ -168,7 +239,8 @@ view analytics and signed playback URLs are not built yet.
 - `backend/server.mts` — the API service; `backend/media/` — media routes, storage (disk or S3), database access and the pipeline worker
 - `backend/media/types.mts` — media types shared by both services (the frontend imports them through `lib/media/types.ts`)
 - `backend/media/transform.mts`, `fields.mts`, `moderation.mts` — transformations, custom metadata, moderation
-- `lib/sample.ts` — sample analytics, API keys, webhooks and billing data (still to be replaced)
+- `backend/media/keys.mts`, `v1.mts`, `webhooks.mts` — API keys, the public API and webhooks
+- `lib/sample.ts` — sample analytics and billing data (still to be replaced)
 - `app/globals.css`, `app/dashboard/dashboard.css` — design tokens and styles
 
 Motion respects `prefers-reduced-motion`.

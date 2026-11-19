@@ -110,6 +110,53 @@ alter table "asset" add column if not exists "moderatedBy" text references "user
 alter table "asset" add column if not exists "moderatedAt" timestamptz;
 create index if not exists "asset_moderation_idx" on "asset" ("organizationId", "moderation") where "moderation" <> 'approved';
 
+-- developer platform: API keys (only a hash is stored), webhook endpoints and their deliveries
+create table if not exists "api_key" (
+  "id"             text primary key,
+  "organizationId" text not null references "organization"("id") on delete cascade,
+  "name"           text not null,
+  "scope"          text not null default 'full',
+  "hash"           text not null unique,
+  "last4"          text not null,
+  "createdBy"      text references "user"("id") on delete set null,
+  "createdAt"      timestamptz not null default now(),
+  "lastUsedAt"     timestamptz,
+  "revokedAt"      timestamptz
+);
+create index if not exists "api_key_org_idx" on "api_key" ("organizationId");
+alter table "asset" add column if not exists "uploadedVia" text;
+
+create table if not exists "webhook_endpoint" (
+  "id"             text primary key,
+  "organizationId" text not null references "organization"("id") on delete cascade,
+  "url"            text not null,
+  "description"    text,
+  "events"         text[] not null default '{}',
+  "secret"         text not null,
+  "enabled"        boolean not null default true,
+  "failures"       integer not null default 0,
+  "createdAt"      timestamptz not null default now()
+);
+create index if not exists "webhook_endpoint_org_idx" on "webhook_endpoint" ("organizationId");
+create table if not exists "webhook_delivery" (
+  "id"             text primary key,
+  "endpointId"     text not null references "webhook_endpoint"("id") on delete cascade,
+  "organizationId" text not null,
+  "event"          text not null,
+  "payload"        jsonb not null,
+  "status"         text not null default 'pending',
+  "attempts"       integer not null default 0,
+  "nextAttemptAt"  timestamptz not null default now(),
+  "responseStatus" integer,
+  "responseBody"   text,
+  "durationMs"     integer,
+  "error"          text,
+  "createdAt"      timestamptz not null default now(),
+  "deliveredAt"    timestamptz
+);
+create index if not exists "webhook_delivery_due_idx" on "webhook_delivery" ("nextAttemptAt") where "status" = 'pending';
+create index if not exists "webhook_delivery_org_idx" on "webhook_delivery" ("organizationId", "createdAt" desc);
+
 -- cached on-the-fly transformations (the files live under <asset>/derived/)
 create table if not exists "asset_variant" (
   "assetId"   text not null references "asset"("id") on delete cascade,

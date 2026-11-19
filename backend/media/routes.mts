@@ -16,17 +16,22 @@
  *   GET    /api/assets?q=&folder=&…         search: same parameters as the Library URL (see parseQuery)
  *   (folders, collections, tags, saved searches and bulk actions: see library.mts)
  *
+ *   (API keys: keys.mts · webhooks: webhooks.mts · the public, key-authenticated API: v1.mts)
+ *
  * The frontend forwards these paths unchanged (see app/api/*).
  */
 import { pool } from '../auth.mts'
 import { guessType, normaliseTag, parseQuery } from './types.mts'
-import { MAX_UPLOAD_BYTES, HttpError, getAssetRow, handle, isMemberOf, newAssetId, prefixOf, requireMember, searchAssets, toDTO } from './assets.mts'
+import { MAX_UPLOAD_BYTES, HttpError, apiAsset, getAssetRow, handle, isMemberOf, newAssetId, prefixOf, searchAssets, toDTO, type AssetRow } from './assets.mts'
+import { handleKeys, sessionActor, type Actor } from './keys.mts'
+import { emitAsset, handleWebhooks } from './webhooks.mts'
 import { mergeMetadata, handleFields } from './fields.mts'
 import { handleModeration, initialModeration, isPublic } from './moderation.mts'
 import { bulk, handleLibrary } from './library.mts'
 import { isLocal, storage } from './storage.mts'
 import { transform } from './transform.mts'
 import { kickWorker } from './worker.mts'
+import { apiBase, handleV1 } from './v1.mts'
 
 const SAFE_REL = /^[A-Za-z0-9_-][A-Za-z0-9._/-]*$/
 const noStore = { 'Cache-Control': 'no-store' }
@@ -44,8 +49,11 @@ function assertDurableStorage() {
 export const isDurable = () => storage().kind === 's3' || Boolean(process.env.MEDIA_DIR)
 
 /* ------------------------------------------------ assets */
+/** Dashboard callers get app-relative URLs; API-key callers get absolute ones. */
+export const dtoFor = (a: Actor, row: AssetRow) => (a.via === 'key' ? apiAsset(row) : toDTO(row))
+
 async function listAll(req: Request) {
-  const { orgId } = await requireMember(req.headers)
+  const { orgId } = await sessionActor(req.headers)
   const query = parseQuery(new URL(req.url).searchParams)
   return Response.json({ assets: (await searchAssets(orgId, query)).map(toDTO) }, { headers: noStore })
 }
@@ -59,12 +67,12 @@ async function folderOf(orgId: string, v: unknown) {
   return v
 }
 
-async function one(req: Request, id: string) {
-  const { orgId } = await requireMember(req.headers)
+export async function one(a: Actor, req: Request, id: string) {
+  const { orgId } = a
   const row = await getAssetRow(id, orgId)
   if (!row) throw new HttpError(404, 'That asset doesn’t exist in this workspace.')
 
-  if (req.method === 'GET') return Response.json({ asset: toDTO(row) }, { headers: noStore })
+  if (req.method === 'GET') return Response.json({ asset: dtoFor(a, row) }, { headers: noStore })
 
   if (req.method === 'PATCH') {
     const b = await body<{ title?: unknown; tags?: unknown; folderId?: unknown; metadata?: unknown }>(req)
@@ -79,10 +87,11 @@ async function one(req: Request, id: string) {
     const folderId = b?.folderId === undefined ? row.folderId : await folderOf(orgId, b.folderId)
     const metadata = b?.metadata === undefined ? row.metadata : await mergeMetadata(orgId, row.metadata ?? {}, b.metadata)
     await pool.query(`update "asset" set title = $2, tags = $3, "folderId" = $4, metadata = $5, "updatedAt" = now() where id = $1`, [id, title, tags, folderId, JSON.stringify(metadata)])
-    return Response.json({ asset: toDTO((await getAssetRow(id, orgId))!) })
+    return Response.json({ asset: dtoFor(a, (await getAssetRow(id, orgId))!) })
   }
 
   if (req.method === 'DELETE') {
+    await emitAsset(row, 'asset.deleted') // queued before the row goes, so the payload still has the asset
     await pool.query(`delete from "asset" where id = $1`, [id])
     await storage().removePrefix(prefixOf(row))
     return new Response(null, { status: 204 })
@@ -90,8 +99,8 @@ async function one(req: Request, id: string) {
   throw new HttpError(405, 'Method not allowed')
 }
 
-async function retry(req: Request, id: string) {
-  const { orgId } = await requireMember(req.headers)
+export async function retry(a: Actor, id: string) {
+  const { orgId } = a
   const row = await getAssetRow(id, orgId)
   if (!row) throw new HttpError(404, 'That asset doesn’t exist in this workspace.')
   if (row.status !== 'ready' && row.status !== 'failed') throw new HttpError(409, 'This asset is still being processed.')
@@ -100,12 +109,12 @@ async function retry(req: Request, id: string) {
   await pool.query(`delete from "asset_variant" where "assetId" = $1`, [id])
   await storage().removePrefix(`${prefixOf(row)}/derived`)
   kickWorker()
-  return Response.json({ asset: toDTO((await getAssetRow(id, orgId))!) })
+  return Response.json({ asset: dtoFor(a, (await getAssetRow(id, orgId))!) })
 }
 
 /* ------------------------------------------------ uploads */
-async function startUpload(req: Request) {
-  const { user, orgId } = await requireMember(req.headers)
+export async function startUpload(a: Actor, req: Request) {
+  const { orgId } = a
   assertDurableStorage()
   const b = await body<{ fileName?: unknown; size?: unknown; mimeType?: unknown; folderId?: unknown }>(req)
   const fileName = typeof b?.fileName === 'string' ? b.fileName.trim().slice(0, 255) : ''
@@ -123,16 +132,19 @@ async function startUpload(req: Request) {
   const originalKey = `${orgId}/${id}/original${ext ? `.${ext}` : ''}`
   const title = fileName.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim() || fileName
   await pool.query(
-    `insert into "asset" (id, "organizationId", "createdBy", title, type, status, "fileName", "mimeType", size, "originalKey", "folderId", moderation)
-     values ($1, $2, $3, $4, $5, 'uploading', $6, $7, $8, $9, $10, $11)`,
-    [id, orgId, user.id, title, type, fileName, mimeType, size, originalKey, folderId, await initialModeration(orgId)],
+    `insert into "asset" (id, "organizationId", "createdBy", "uploadedVia", title, type, status, "fileName", "mimeType", size, "originalKey", "folderId", moderation)
+     values ($1, $2, $3, $4, $5, $6, 'uploading', $7, $8, $9, $10, $11, $12)`,
+    [id, orgId, a.userId, a.via === 'key' ? `API key: ${a.keyName}` : null, title, type, fileName, mimeType, size, originalKey, folderId, await initialModeration(orgId)],
   )
   const row = await getAssetRow(id, orgId)
-  return Response.json({ asset: toDTO(row!), upload: await storage().uploadTarget(originalKey, id) }, { status: 201 })
+  const upload = await storage().uploadTarget(originalKey, id)
+  // local disk: key callers send the file to the v1 route, with their key, at an absolute URL
+  if (a.via === 'key' && upload.url.startsWith('/')) upload.url = `${apiBase()}/api/v1/uploads/${id}`
+  return Response.json({ asset: dtoFor(a, row!), upload }, { status: 201 })
 }
 
-async function receiveUpload(req: Request, id: string) {
-  const { orgId } = await requireMember(req.headers)
+export async function receiveUpload(a: Actor, req: Request, id: string) {
+  const { orgId } = a
   const row = await getAssetRow(id, orgId)
   if (!row) throw new HttpError(404, 'That upload doesn’t exist.')
   if (row.status !== 'uploading') throw new HttpError(409, 'This file has already been uploaded.')
@@ -147,17 +159,17 @@ async function receiveUpload(req: Request, id: string) {
   }
 }
 
-async function completeUpload(req: Request, id: string) {
-  const { orgId } = await requireMember(req.headers)
+export async function completeUpload(a: Actor, id: string) {
+  const { orgId } = a
   const row = await getAssetRow(id, orgId)
   if (!row) throw new HttpError(404, 'That upload doesn’t exist.')
-  if (row.status !== 'uploading') return Response.json({ asset: toDTO(row) })
+  if (row.status !== 'uploading') return Response.json({ asset: dtoFor(a, row) })
   const stored = await storage().size(row.originalKey)
   if (stored === null) throw new HttpError(400, 'The file never arrived. Try uploading it again.')
   if (stored !== Number(row.size)) throw new HttpError(400, `Only ${stored} of ${row.size} bytes arrived. Try uploading it again.`)
   await pool.query(`update "asset" set status = 'queued', stage = 1, progress = 0, "updatedAt" = now() where id = $1`, [id])
   kickWorker()
-  return Response.json({ asset: toDTO((await getAssetRow(id, orgId))!) })
+  return Response.json({ asset: dtoFor(a, (await getAssetRow(id, orgId))!) })
 }
 
 /* ------------------------------------------------ playback */
@@ -192,7 +204,10 @@ async function media(req: Request, id: string, rel: string) {
 export async function handleMedia(req: Request, pathname: string): Promise<Response | null> {
   const m = req.method
   const parts = pathname.split('/').filter(Boolean) // ['api', 'assets', ...]
-  if (parts[0] !== 'api' || !['assets', 'uploads', 'media', 'folders', 'collections', 'tags', 'searches', 'fields', 'moderation'].includes(parts[1])) return null
+  if (parts[0] !== 'api' || !['assets', 'uploads', 'media', 'folders', 'collections', 'tags', 'searches', 'fields', 'moderation', 'keys', 'webhooks', 'v1'].includes(parts[1])) return null
+  if (parts[1] === 'v1') return handleV1(req, parts)
+  if (parts[1] === 'keys' && parts.length <= 3) return handle(() => handleKeys(req, parts[2]))
+  if (parts[1] === 'webhooks' && parts.length <= 5) return handle(() => handleWebhooks(req, parts))
   if (parts[1] === 'fields' && parts.length <= 3) return handle(() => handleFields(req, parts[2]))
   if (['folders', 'collections', 'tags', 'searches'].includes(parts[1])) return handle(() => handleLibrary(req, parts))
   if (parts[1] === 'moderation' && parts.length === 3) return handle(() => handleModeration(req, parts[2]))
@@ -208,13 +223,13 @@ export async function handleMedia(req: Request, pathname: string): Promise<Respo
   return handle(async () => {
     if (parts[1] === 'assets') {
       if (!id && m === 'GET') return listAll(req)
-      if (id && parts.length === 3) return one(req, id)
-      if (id && parts[3] === 'retry' && parts.length === 4 && m === 'POST') return retry(req, id)
+      if (id && parts.length === 3) return one(await sessionActor(req.headers), req, id)
+      if (id && parts[3] === 'retry' && parts.length === 4 && m === 'POST') return retry(await sessionActor(req.headers), id)
     }
     if (parts[1] === 'uploads') {
-      if (!id && m === 'POST') return startUpload(req)
-      if (id && parts.length === 3 && m === 'PUT') return receiveUpload(req, id)
-      if (id && parts[3] === 'complete' && parts.length === 4 && m === 'POST') return completeUpload(req, id)
+      if (!id && m === 'POST') return startUpload(await sessionActor(req.headers), req)
+      if (id && parts.length === 3 && m === 'PUT') return receiveUpload(await sessionActor(req.headers), req, id)
+      if (id && parts[3] === 'complete' && parts.length === 4 && m === 'POST') return completeUpload(await sessionActor(req.headers), id)
     }
     if (parts[1] === 'media' && id && parts.length > 3 && (m === 'GET' || m === 'HEAD')) return media(req, id, parts.slice(3).join('/'))
     throw new HttpError(404, 'Not found')

@@ -16,6 +16,7 @@ import path from 'node:path'
 import { pool } from '../auth.mts'
 import { prefixOf, type AssetRow } from './assets.mts'
 import { reviewAsset } from './moderation.mts'
+import { emitAsset } from './webhooks.mts'
 import { storage } from './storage.mts'
 import type { MediaType, Rendition } from './types.mts'
 
@@ -301,11 +302,13 @@ async function processAsset(job: AssetRow) {
     })
     // moderation: blocklist and optional automatic review decide whether it goes public
     await reviewAsset(job.id).catch((e) => console.error(`[media] ${job.id} moderation check failed:`, e instanceof Error ? e.message : e))
+    await emitAsset(job.id, 'asset.ready')
     console.log(`[media] ${job.id} ready in ${((Date.now() - t0) / 1000).toFixed(1)}s (${info.type}, ${renditions.length} outputs)`)
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     console.error(`[media] ${job.id} failed:`, message)
     await update(job.id, { status: 'failed', error: message.slice(0, 500) })
+    await emitAsset(job.id, 'asset.failed')
   } finally {
     await rm(scratch, { recursive: true, force: true })
   }

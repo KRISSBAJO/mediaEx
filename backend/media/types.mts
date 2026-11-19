@@ -46,6 +46,47 @@ export type MediaAsset = {
   moderationNote: string | null
 }
 
+/* ------------------------------------------------ developer platform */
+export const KEY_SCOPES = ['read', 'upload', 'full'] as const
+export type KeyScope = (typeof KEY_SCOPES)[number]
+export const KEY_SCOPE_LABEL: Record<KeyScope, string> = { read: 'Read only', upload: 'Upload', full: 'Full access' }
+export type ApiKey = { id: string; name: string; scope: KeyScope; last4: string; createdAt: string; lastUsedAt: string | null; createdBy: string | null }
+
+export const WEBHOOK_EVENTS = ['asset.ready', 'asset.failed', 'asset.deleted', 'asset.review_required', 'asset.approved', 'asset.rejected'] as const
+export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number]
+export const WEBHOOK_EVENT_HELP: Record<WebhookEvent, string> = {
+  'asset.ready': 'An upload finished processing and can stream',
+  'asset.failed': 'Processing failed',
+  'asset.deleted': 'An asset was deleted',
+  'asset.review_required': 'Moderation is holding an upload for review',
+  'asset.approved': 'Someone approved an asset in review',
+  'asset.rejected': 'Someone rejected an asset in review',
+}
+export type WebhookEndpoint = {
+  id: string
+  url: string
+  description: string | null
+  events: WebhookEvent[]
+  enabled: boolean
+  failures: number
+  createdAt: string
+  stats: { total: number; succeeded: number; failed: number; pending: number }
+}
+export type WebhookDelivery = {
+  id: string
+  endpointId: string
+  url: string
+  event: string
+  status: 'pending' | 'succeeded' | 'failed'
+  attempts: number
+  responseStatus: number | null
+  durationMs: number | null
+  error: string | null
+  createdAt: string
+  deliveredAt: string | null
+  nextAttemptAt: string | null
+}
+
 /* ------------------------------------------------ moderation */
 export type ModerationState = 'approved' | 'pending' | 'rejected'
 export type ModerationMode = 'off' | 'all' | 'flagged'
