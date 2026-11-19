@@ -2,11 +2,13 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { AuthHeader, Field, SubmitButton, fakeRequest, isEmail } from './ui'
+import { authClient } from '@/lib/auth-client'
+import { AuthHeader, Field, FormNote, SubmitButton, isEmail } from './ui'
 
 export default function ForgotForm() {
   const [email, setEmail] = useState('')
   const [error, setError] = useState<string>()
+  const [formError, setFormError] = useState('')
   const [loading, setLoading] = useState(false)
   const [sentTo, setSentTo] = useState('')
 
@@ -14,9 +16,12 @@ export default function ForgotForm() {
     e.preventDefault()
     if (!isEmail(email)) return setError('Enter a valid email address.')
     setError(undefined)
+    setFormError('')
     setLoading(true)
-    await fakeRequest() // TODO: call the real password-reset endpoint
+    const { error: err } = await authClient.requestPasswordReset({ email: email.trim(), redirectTo: '/reset-password' })
     setLoading(false)
+    // same answer whether or not the account exists, so the form can't be used to probe for emails
+    if (err && err.status === 429) return setFormError('Too many attempts. Wait a minute and try again.')
     setSentTo(email.trim())
   }
 
@@ -34,7 +39,7 @@ export default function ForgotForm() {
             title="Check your inbox"
             sub={
               <>
-                If an account exists for <b>{sentTo}</b>, you&apos;ll get a reset link in a minute. It expires in 30 minutes.
+                If an account exists for <b>{sentTo}</b>, you&apos;ll get a reset link in a minute. It expires in an hour.
               </>
             }
           />
@@ -46,10 +51,21 @@ export default function ForgotForm() {
         <>
           <AuthHeader title="Reset your password" sub="Enter the email you use for MediaEX and we'll send you a reset link." />
           <form onSubmit={submit} noValidate className="auth-fields">
-            <Field label="Email" name="email" type="email" autoComplete="email" placeholder="you@studio.com" value={email} onChange={(v) => {
+            <Field
+              label="Email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@studio.com"
+              value={email}
+              onChange={(v) => {
                 setEmail(v)
                 setError(undefined)
-              }} error={error} autoFocus />
+              }}
+              error={error}
+              autoFocus
+            />
+            {formError && <FormNote tone="error">{formError}</FormNote>}
             <SubmitButton loading={loading}>Send reset link</SubmitButton>
           </form>
         </>

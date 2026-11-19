@@ -2347,3 +2347,14 @@ a.asset-cell:hover b {
 .details {
   grid-template-columns: minmax(0, 1fr);
 }
+
+.form-hint {
+  display: block;
+  margin-top: 8px;
+  color: var(--dim);
+  font-size: 12.5px;
+}
+.app input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

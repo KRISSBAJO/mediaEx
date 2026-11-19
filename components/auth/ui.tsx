@@ -1,6 +1,7 @@
 'use client'
 
 import { useId, useState } from 'react'
+import { authClient } from '@/lib/auth-client'
 
 export function AuthHeader({ title, sub }: { title: string; sub: React.ReactNode }) {
   return (
@@ -33,20 +34,35 @@ function GitHubIcon() {
   )
 }
 
-export function SocialButtons({ disabled }: { disabled?: boolean }) {
+export type Social = { google: boolean; github: boolean }
+
+/** Renders only the providers configured on the server; nothing at all when none are. */
+export function SocialButtons({ social, callbackURL, disabled }: { social: Social; callbackURL: string; disabled?: boolean }) {
+  const [busy, setBusy] = useState<string | null>(null)
+  if (!social.google && !social.github) return null
+  const go = async (provider: 'google' | 'github') => {
+    setBusy(provider)
+    const { error } = await authClient.signIn.social({ provider, callbackURL })
+    if (error) setBusy(null)
+  }
   return (
     <div className="auth-social">
-      <button type="button" className="auth-social-btn" disabled={disabled}>
-        <GoogleIcon /> Google
-      </button>
-      <button type="button" className="auth-social-btn" disabled={disabled}>
-        <GitHubIcon /> GitHub
-      </button>
+      {social.google && (
+        <button type="button" className="auth-social-btn" disabled={disabled || !!busy} onClick={() => go('google')}>
+          <GoogleIcon /> Google
+        </button>
+      )}
+      {social.github && (
+        <button type="button" className="auth-social-btn" disabled={disabled || !!busy} onClick={() => go('github')}>
+          <GitHubIcon /> GitHub
+        </button>
+      )}
     </div>
   )
 }
 
-export function Divider({ children }: { children: React.ReactNode }) {
+export function Divider({ children, show = true }: { children: React.ReactNode; show?: boolean }) {
+  if (!show) return null
   return (
     <div className="auth-divider" role="separator">
       <span>{children}</span>
@@ -159,15 +175,12 @@ export function SubmitButton({ loading, children }: { loading: boolean; children
   )
 }
 
-export function FormNote({ children, tone = 'info' }: { children: React.ReactNode; tone?: 'info' | 'ok' }) {
+export function FormNote({ children, tone = 'info' }: { children: React.ReactNode; tone?: 'info' | 'ok' | 'error' }) {
   return (
-    <div className={`form-note ${tone}`} role="status">
+    <div className={`form-note ${tone}`} role={tone === 'error' ? 'alert' : 'status'}>
       {children}
     </div>
   )
 }
 
 export const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
-
-/** Placeholder for the real auth call. Resolves after a short delay so the UI states can be seen. */
-export const fakeRequest = () => new Promise((r) => setTimeout(r, 900))

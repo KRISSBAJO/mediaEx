@@ -4,7 +4,9 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Logo from '@/components/Logo'
-import { ASSETS, USAGE, USER, WORKSPACE, WORKSPACES, getAsset } from '@/lib/sample'
+import { authClient, authMessage } from '@/lib/auth-client'
+import { ASSETS, USAGE, getAsset } from '@/lib/sample'
+import { AccountProvider, useAccount, type Account } from './account'
 import Icon from './Icon'
 import { Avatar, Meter, Toaster, toast } from './ui'
 
@@ -49,11 +51,29 @@ function useOutside(open: boolean, close: () => void) {
 }
 
 /* ------------------------------------------------ sidebar */
-function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNewWorkspace: () => void }) {
   const path = usePathname()
   const router = useRouter()
+  const { user, workspace, workspaces } = useAccount()
   const [ws, setWs] = useState(false)
   const [me, setMe] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const switchTo = async (id: string) => {
+    setWs(false)
+    if (id === workspace.id) return
+    setBusy(true)
+    const { error } = await authClient.organization.setActive({ organizationId: id })
+    setBusy(false)
+    if (error) return toast(authMessage(error, 'Couldn’t switch workspace'))
+    router.refresh()
+  }
+  const signOut = async () => {
+    setMe(false)
+    await authClient.signOut()
+    router.replace('/sign-in')
+    router.refresh()
+  }
   const wsRef = useOutside(ws, () => setWs(false))
   const meRef = useOutside(me, () => setMe(false))
   const s = USAGE.storage
@@ -69,33 +89,25 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
       <div className="menu-wrap" ref={wsRef}>
         <button type="button" className="ws" aria-haspopup="menu" aria-expanded={ws} onClick={() => setWs((o) => !o)}>
-          <span className="ws-mark">{WORKSPACE.initial}</span>
+          <span className="ws-mark">{workspace.initial}</span>
           <span className="ws-text">
-            <b>{WORKSPACE.name}</b>
-            <em>{WORKSPACE.plan} plan</em>
+            <b>{workspace.name}</b>
+            <em>{busy ? 'Switching…' : `${workspace.role[0].toUpperCase()}${workspace.role.slice(1)} · Free plan`}</em>
           </span>
           <Icon name="updown" size={15} />
         </button>
         {ws && (
           <div className="menu" role="menu">
             <span className="menu-label">Workspaces</span>
-            {WORKSPACES.map((w) => (
-              <button
-                key={w.slug}
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setWs(false)
-                  if (w.slug !== WORKSPACE.slug) toast(`Switching workspaces needs the backend — showing ${WORKSPACE.name}`)
-                }}
-              >
+            {workspaces.map((w) => (
+              <button key={w.id} type="button" role="menuitem" onClick={() => switchTo(w.id)}>
                 <span className="ws-mark sm">{w.initial}</span>
                 {w.name}
-                {w.slug === WORKSPACE.slug && <Icon name="check" size={15} className="menu-check" />}
+                {w.id === workspace.id && <Icon name="check" size={15} className="menu-check" />}
               </button>
             ))}
             <hr />
-            <button type="button" role="menuitem" onClick={() => (setWs(false), toast('Workspace creation needs the backend'))}>
+            <button type="button" role="menuitem" onClick={() => (setWs(false), onNewWorkspace())}>
               <Icon name="plus" size={15} /> New workspace
             </button>
           </div>
@@ -147,23 +159,23 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
         <div className="menu-wrap" ref={meRef}>
           <button type="button" className="me" aria-haspopup="menu" aria-expanded={me} onClick={() => setMe((o) => !o)}>
-            <Avatar initials={USER.initials} size={30} />
+            <Avatar initials={user.initials} size={30} />
             <span className="ws-text">
-              <b>{USER.name}</b>
-              <em>{USER.email}</em>
+              <b>{user.name}</b>
+              <em>{user.email}</em>
             </span>
             <Icon name="more" size={16} />
           </button>
           {me && (
             <div className="menu menu-up" role="menu">
-              <Link href="/dashboard/settings" role="menuitem" onClick={() => (setMe(false), onNavigate?.())}>
+              <Link href="/dashboard/settings?tab=account" role="menuitem" onClick={() => (setMe(false), onNavigate?.())}>
                 <Icon name="settings" size={15} /> Account settings
               </Link>
               <Link href="/" role="menuitem" onClick={() => setMe(false)}>
                 <Icon name="external" size={15} /> MediaEX home
               </Link>
               <hr />
-              <button type="button" role="menuitem" onClick={() => router.push('/sign-in')}>
+              <button type="button" role="menuitem" onClick={signOut}>
                 <Icon name="logout" size={15} /> Sign out
               </button>
             </div>
@@ -284,8 +296,8 @@ function CommandMenu({ open, onClose }: { open: boolean; onClose: () => void }) 
 }
 
 /* ------------------------------------------------ top bar */
-function crumbs(path: string) {
-  const out: { href: string; label: string }[] = [{ href: '/dashboard', label: WORKSPACE.name }]
+function crumbs(path: string, workspaceName: string) {
+  const out: { href: string; label: string }[] = [{ href: '/dashboard', label: workspaceName }]
   const parts = path.split('/').filter(Boolean).slice(1)
   let href = '/dashboard'
   for (const p of parts) {
@@ -297,11 +309,12 @@ function crumbs(path: string) {
   return out
 }
 
-export default function Shell({ children }: { children: React.ReactNode }) {
+export default function Shell({ account, children }: { account: Account; children: React.ReactNode }) {
   const path = usePathname()
   const [drawer, setDrawer] = useState(false)
   const [cmd, setCmd] = useState(false)
   const [mac, setMac] = useState(false)
+  const [newWs, setNewWs] = useState(false)
 
   useEffect(() => {
     setMac(/Mac|iPhone|iPad/.test(navigator.platform))
@@ -328,12 +341,13 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     }
   }, [drawer])
 
-  const trail = crumbs(path)
+  const trail = crumbs(path, account.workspace.name)
 
   return (
+    <AccountProvider value={account}>
     <div className={`app ${drawer ? 'drawer-open' : ''}`}>
       <aside className="side" aria-label="Sidebar">
-        <Sidebar onNavigate={() => setDrawer(false)} />
+        <Sidebar onNavigate={() => setDrawer(false)} onNewWorkspace={() => setNewWs(true)} />
       </aside>
       <div className="side-scrim" onClick={() => setDrawer(false)} aria-hidden="true" />
 
@@ -357,7 +371,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
           <div className="top-actions">
-            <span className="sample-pill" title="MediaEX has no backend yet. Numbers on these pages are generated sample data.">
+            <span className="sample-pill" title="Your account, workspaces and team are real. Media, uploads and analytics are generated sample data until the media backend exists.">
               Sample data
             </span>
             <button type="button" className="search-btn" onClick={() => setCmd(true)}>
@@ -379,7 +393,73 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       </div>
 
       <CommandMenu open={cmd} onClose={() => setCmd(false)} />
+      {newWs && <NewWorkspace onClose={() => setNewWs(false)} />}
       <Toaster />
+    </div>
+    </AccountProvider>
+  )
+}
+
+/* ------------------------------------------------ new workspace */
+function NewWorkspace({ onClose }: { onClose: () => void }) {
+  const router = useRouter()
+  const [name, setName] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 28)
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (name.trim().length < 2) return setErr('Give the workspace a name of at least 2 characters.')
+    setBusy(true)
+    const suffix = Math.random().toString(36).slice(2, 6)
+    const { data, error } = await authClient.organization.create({ name: name.trim(), slug: `${slug || 'workspace'}-${suffix}` })
+    if (error || !data) {
+      setBusy(false)
+      return setErr(authMessage(error, 'Couldn’t create the workspace.'))
+    }
+    await authClient.organization.setActive({ organizationId: data.id })
+    toast(`Created ${data.name}`)
+    onClose()
+    router.push('/dashboard')
+    router.refresh()
+  }
+
+  return (
+    <div className="dialog-scrim" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+      <form className="dialog" role="dialog" aria-modal="true" aria-labelledby="nw-title" onSubmit={submit} noValidate>
+        <h2 id="nw-title">New workspace</h2>
+        <p>Workspaces keep media, keys and teammates separate — one per client, brand or team works well.</p>
+        <div className="dialog-body">
+          <label className="field-d">
+            <span>Name</span>
+            <input
+              className="input"
+              value={name}
+              autoFocus
+              placeholder="e.g. Lumen Pictures"
+              onChange={(e) => {
+                setName(e.target.value)
+                setErr('')
+              }}
+              aria-invalid={!!err}
+            />
+            {err ? <small className="is-bad">{err}</small> : <small>You’ll be its owner. You can rename it later.</small>}
+          </label>
+        </div>
+        <div className="dialog-foot">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
+            {busy ? 'Creating…' : 'Create workspace'}
+          </button>
+        </div>
+      </form>
     </div>
   )
 }

@@ -5,16 +5,21 @@
   "scripts": {
     "dev": "next dev -p 3400",
     "build": "next build",
-    "start": "next start -p 3400"
+    "prestart": "npm run db:migrate",
+    "start": "next start -p 3400",
+    "db:migrate": "node --env-file-if-exists=.env.local --experimental-strip-types --no-warnings scripts/migrate.mts"
   },
   "dependencies": {
+    "better-auth": "^1.7.26",
     "next": "^16.4.6",
+    "pg": "^8.23.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "three": "^0.187.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/three": "^0.187.0",

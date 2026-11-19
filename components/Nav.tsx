@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
+import { authClient } from '@/lib/auth-client'
 import Logo from './Logo'
 
 const LINKS = [
@@ -13,6 +14,7 @@ const LINKS = [
 ]
 
 export default function Nav() {
+  const { data: session } = authClient.useSession()
   const [scrolled, setScrolled] = useState(false)
   const [hidden, setHidden] = useState(false)
   const [open, setOpen] = useState(false)
@@ -142,12 +144,20 @@ export default function Nav() {
         </nav>
 
         <div className="nav-cta">
-          <Link href="/sign-in" className="nav-signin">
-            Sign in
-          </Link>
-          <Link href="/sign-up" className="btn btn-primary btn-sm">
-            Start free
-          </Link>
+          {session ? (
+            <Link href="/dashboard" className="btn btn-primary btn-sm">
+              Dashboard
+            </Link>
+          ) : (
+            <>
+              <Link href="/sign-in" className="nav-signin">
+                Sign in
+              </Link>
+              <Link href="/sign-up" className="btn btn-primary btn-sm">
+                Start free
+              </Link>
+            </>
+          )}
           <button
             type="button"
             className="nav-burger"
@@ -178,12 +188,20 @@ export default function Nav() {
           ))}
         </nav>
         <div className="nav-sheet-foot" style={{ ['--i' as string]: LINKS.length }}>
-          <Link href="/sign-in" className="btn btn-ghost btn-lg" tabIndex={open ? 0 : -1}>
-            Sign in
-          </Link>
-          <Link href="/sign-up" className="btn btn-primary btn-lg" tabIndex={open ? 0 : -1}>
-            Start free
-          </Link>
+          {session ? (
+            <Link href="/dashboard" className="btn btn-primary btn-lg" tabIndex={open ? 0 : -1} style={{ gridColumn: '1 / -1' }}>
+              Open dashboard
+            </Link>
+          ) : (
+            <>
+              <Link href="/sign-in" className="btn btn-ghost btn-lg" tabIndex={open ? 0 : -1}>
+                Sign in
+              </Link>
+              <Link href="/sign-up" className="btn btn-primary btn-lg" tabIndex={open ? 0 : -1}>
+                Start free
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </header>

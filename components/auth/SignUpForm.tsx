@@ -1,33 +1,46 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { AuthHeader, Divider, Field, PasswordField, SocialButtons, SubmitButton, fakeRequest, isEmail, strength } from './ui'
+import { authClient, authMessage } from '@/lib/auth-client'
+import { AuthHeader, Divider, Field, FormNote, PasswordField, SocialButtons, SubmitButton, isEmail, strength, type Social } from './ui'
 
-export default function SignUpForm() {
+export default function SignUpForm({ next, social }: { next: string; social: Social }) {
+  const router = useRouter()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string }>({})
+  const [formError, setFormError] = useState('')
   const [loading, setLoading] = useState(false)
   const [sentTo, setSentTo] = useState('')
   const edit = (key: keyof typeof errors, set: (v: string) => void) => (v: string) => {
     set(v)
+    setFormError('')
     if (errors[key]) setErrors((e) => ({ ...e, [key]: undefined }))
   }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const next: typeof errors = {}
-    if (!name.trim()) next.name = 'Tell us your name.'
-    if (!isEmail(email)) next.email = 'Enter a valid email address.'
-    if (strength(password) < 2) next.password = 'Use 8+ characters with a mix of letters, numbers or symbols.'
-    setErrors(next)
-    if (Object.keys(next).length) return
+    const nextErrors: typeof errors = {}
+    if (!name.trim()) nextErrors.name = 'Tell us your name.'
+    if (!isEmail(email)) nextErrors.email = 'Enter a valid email address.'
+    if (strength(password) < 2) nextErrors.password = 'Use 8+ characters with a mix of letters, numbers or symbols.'
+    setErrors(nextErrors)
+    if (Object.keys(nextErrors).length) return
     setLoading(true)
-    await fakeRequest() // TODO: call the real sign-up endpoint
+    setFormError('')
+    const { data, error } = await authClient.signUp.email({ name: name.trim(), email: email.trim(), password, callbackURL: next })
     setLoading(false)
-    setSentTo(email.trim())
+    if (error) return setFormError(authMessage(error))
+    // signed in straight away when email verification isn't required; otherwise wait for the link
+    if (data?.token) {
+      router.replace(next)
+      router.refresh()
+    } else {
+      setSentTo(email.trim())
+    }
   }
 
   if (sentTo) {
@@ -59,19 +72,20 @@ export default function SignUpForm() {
   return (
     <div className="auth-card">
       <AuthHeader title="Create your account" sub="Start free. No card required." />
-      <SocialButtons disabled={loading} />
-      <Divider>or with email</Divider>
+      <SocialButtons social={social} callbackURL={next} disabled={loading} />
+      <Divider show={social.google || social.github}>or with email</Divider>
       <form onSubmit={submit} noValidate className="auth-fields">
         <Field label="Full name" name="name" autoComplete="name" placeholder="Ada Okafor" value={name} onChange={edit('name', setName)} error={errors.name} autoFocus />
         <Field label="Work email" name="email" type="email" autoComplete="email" placeholder="you@studio.com" value={email} onChange={edit('email', setEmail)} error={errors.email} />
         <PasswordField label="Password" name="password" autoComplete="new-password" value={password} onChange={edit('password', setPassword)} error={errors.password} meter />
+        {formError && <FormNote tone="error">{formError}</FormNote>}
         <SubmitButton loading={loading}>Create account</SubmitButton>
         <p className="auth-legal">
           By creating an account you agree to the <a href="#">Terms</a> and <a href="#">Privacy Policy</a>.
         </p>
       </form>
       <p className="auth-switch">
-        Already have an account? <Link href="/sign-in">Sign in</Link>
+        Already have an account? <Link href={next === '/dashboard' ? '/sign-in' : `/sign-in?next=${encodeURIComponent(next)}`}>Sign in</Link>
       </p>
     </div>
   )

@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { ACTIVITY, ASSETS, COUNTRIES, PIPELINE, USER, compact, metric, relDay, type Range } from '@/lib/sample'
+import { ACTIVITY, ASSETS, COUNTRIES, PIPELINE, compact, metric, relDay, type Range } from '@/lib/sample'
+import { useAccount } from '../account'
 import { BarList, LineChart, ViewToggle } from '../charts'
 import Icon from '../Icon'
 import { Card, PageHead, RANGES, Segmented, StatTile, StatusBadge, Thumb, TypeIcon } from '../ui'
@@ -31,6 +32,7 @@ function useQueue() {
 }
 
 export default function Overview() {
+  const { user } = useAccount()
   const [range, setRange] = useState<Range>('30d')
   const [table, setTable] = useState(false)
   const views = metric(11, range, 21000, { trend: 0.006 })
@@ -49,7 +51,7 @@ export default function Overview() {
 
   return (
     <>
-      <PageHead title={`${greet}, ${USER.name.split(' ')[0]}`} sub="Here is how your media performed, and what the pipeline is working on.">
+      <PageHead title={`${greet}, ${user.name.split(' ')[0]}`} sub="Here is how your media performed, and what the pipeline is working on.">
         <Segmented label="Date range" value={range} options={RANGES} onChange={setRange} />
       </PageHead>
 
