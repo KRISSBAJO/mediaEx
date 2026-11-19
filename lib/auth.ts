@@ -7,18 +7,17 @@
 import { appendFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { betterAuth } from 'better-auth'
-import { nextCookies } from 'better-auth/next-js'
 import { organization } from 'better-auth/plugins'
 import pg from 'pg'
 
-const baseURL = process.env.BETTER_AUTH_URL ?? 'http://localhost:3400'
+export const baseURL = new URL(process.env.BETTER_AUTH_URL ?? 'http://localhost:3400').origin
 const mailEnabled = Boolean(process.env.RESEND_API_KEY)
 
 declare global {
   // one pool per process, also across dev hot reloads
   var __mxPool: pg.Pool | undefined
 }
-export const pool = (globalThis.__mxPool ??= new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 10 }))
+export const pool = (globalThis.__mxPool ??= new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 10, connectionTimeoutMillis: 5000 }))
 
 /* ------------------------------------------------ email */
 type Mail = { to: string; subject: string; text: string; link?: string }
@@ -55,13 +54,13 @@ function slugify(s: string) {
       .slice(0, 24) || 'workspace'
   )
 }
-const suffix = () => Math.random().toString(36).slice(2, 6)
+export function personalWorkspaceName(name: string) {
+  const first = name.trim().split(/\s+/)[0] || 'My'
+  return { name: `${first}'s workspace`, slug: `${slugify(first)}-${crypto.randomUUID().slice(0, 8)}` }
+}
 
 export async function createPersonalWorkspace(userId: string, name: string): Promise<void> {
-  const first = name.trim().split(/\s+/)[0] || 'My'
-  await auth.api.createOrganization({
-    body: { name: `${first}'s workspace`, slug: `${slugify(first)}-${suffix()}`, userId },
-  })
+  await auth.api.createOrganization({ body: { ...personalWorkspaceName(name), userId } })
 }
 
 /* ------------------------------------------------ social sign-in (only when configured) */
@@ -155,7 +154,6 @@ export const auth = betterAuth({
         })
       },
     }),
-    nextCookies(), // must stay last
   ],
 })
 
