@@ -1,6 +1,6 @@
 /**
  * Creates or updates the auth tables (user, session, account, verification, organization, member, invitation).
- * Runs before `npm start` (prestart) and on demand with `npm run db:migrate`. Safe to run repeatedly.
+ * Runs at backend startup and on demand with `npm run db:migrate`.
  */
 import { getMigrations } from 'better-auth/db/migration'
 // @ts-ignore -- Node runs this file directly and needs the explicit .ts extension
