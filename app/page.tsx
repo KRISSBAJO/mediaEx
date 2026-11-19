@@ -3,7 +3,7 @@ import WaveTerrain from '@/components/WaveTerrain'
 import Nav from '@/components/Nav'
 import MotionRoot from '@/components/MotionRoot'
 import Pricing from '@/components/Pricing'
-import Logo from '@/components/Logo'
+import Footer from '@/components/Footer'
 import Timecode from '@/components/Timecode'
 
 const BRANDS = ['Northwind Studios', 'Lumen Pictures', 'Kairo Audio', 'Halcyon', 'Driftwave', 'Orbit FM', 'Paperplane', 'Nightjar Films', 'Atlas Sports', 'Mono/Poly']
@@ -445,42 +445,7 @@ export default function Home() {
         </section>
       </main>
 
-      <footer className="footer">
-        <div className="footer-inner">
-          <div className="footer-brand">
-            <a href="#top" className="brand">
-              <Logo />
-              <span>
-                Media<b>EX</b>
-              </span>
-            </a>
-            <p>The media cloud for creators and studios.</p>
-          </div>
-          {[
-            { h: 'Product', l: ['Upload', 'Transcoding', 'Streaming', 'AI Studio', 'Analytics'] },
-            { h: 'Developers', l: ['Docs', 'API reference', 'SDKs', 'Player', 'Status'] },
-            { h: 'Company', l: ['About', 'Customers', 'Careers', 'Blog', 'Contact'] },
-          ].map((c) => (
-            <div key={c.h} className="footer-col">
-              <h4>{c.h}</h4>
-              {c.l.map((x) => (
-                <a key={x} href="#top">
-                  {x}
-                </a>
-              ))}
-            </div>
-          ))}
-        </div>
-        <div className="footer-mark" aria-hidden="true">
-          MediaEX
-        </div>
-        <div className="footer-base">
-          <span>© {new Date().getFullYear()} MediaEX, Inc.</span>
-          <span>
-            <i className="status-dot" /> All systems operational
-          </span>
-        </div>
-      </footer>
+      <Footer />
     </>
   )
 }
