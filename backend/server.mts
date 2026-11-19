@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { fromNodeHeaders, toNodeHandler } from 'better-auth/node'
-import { auth, baseURL, enabledSocial, pool } from '../lib/auth.ts'
+import { auth, baseURL, enabledSocial, pool } from './auth.mts'
 import { getAccount, getInvitation } from './account.mts'
 
 const frontend = new URL(baseURL)

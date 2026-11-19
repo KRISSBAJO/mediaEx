@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { auth, personalWorkspaceName, pool } from '../lib/auth.ts'
+import { auth, personalWorkspaceName, pool } from './auth.mts'
 
 type Workspace = { id: string; name: string; slug: string; createdAt: Date; role: string }
 

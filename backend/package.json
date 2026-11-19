@@ -1,0 +1,20 @@
+{
+  "name": "mediaex-backend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "db:migrate": "node --experimental-strip-types migrate.mts",
+    "prestart": "npm run db:migrate",
+    "start": "node --experimental-strip-types server.mts"
+  },
+  "dependencies": {
+    "better-auth": "1.7.26",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "@types/pg": "8.23.1",
+    "typescript": "7.0.2"
+  }
+}

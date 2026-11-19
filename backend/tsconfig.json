@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "esModuleInterop": true
   },
-  "include": ["./**/*.mts", "../lib/auth.ts", "../scripts/migrate.mts"]
+  "include": ["**/*.mts", "**/*.ts"]
 }
