@@ -2,137 +2,49 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
-import { PIPELINE, RETENTION, bytes, compact, dayLabel, duration as fmtDuration, getAsset, series } from '@/lib/sample'
-import { LineChart, ViewToggle } from '../charts'
+import { useEffect, useState } from 'react'
+import { STAGES, isActive } from '@/lib/media/types'
+import { bytes, duration as fmtDuration } from '@/lib/sample'
 import Icon from '../Icon'
-import { Card, StatusBadge, Tabs, Thumb, TypeIcon, copyText, toast } from '../ui'
+import MediaPlayer from '../MediaPlayer'
+import { Ago, dims, useMedia } from '../media'
+import { Card, StatusBadge, Tabs, TypeIcon, copyText } from '../ui'
 
-type Tab = 'renditions' | 'captions' | 'analytics' | 'embed'
-
-function tc(s: number) {
-  const f = Math.floor((s % 1) * 24)
-  const t = Math.floor(s)
-  return [Math.floor(t / 3600), Math.floor((t % 3600) / 60), t % 60, f].map((n) => String(n).padStart(2, '0')).join(':')
-}
-
-function Player({ id }: { id: string }) {
-  const a = getAsset(id)!
-  const [playing, setPlaying] = useState(false)
-  const [t, setT] = useState(0)
-  const len = a.duration || 30
-  const raf = useRef(0)
-
-  useEffect(() => {
-    if (!playing) return
-    let last = performance.now()
-    const tick = (now: number) => {
-      setT((x) => {
-        const n = x + (now - last) / 1000
-        return n >= len ? 0 : n
-      })
-      last = now
-      raf.current = requestAnimationFrame(tick)
-    }
-    raf.current = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf.current)
-  }, [playing, len])
-
-  const seek = (e: React.PointerEvent<HTMLDivElement>) => {
-    const r = e.currentTarget.getBoundingClientRect()
-    setT(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * len)
-  }
-
-  return (
-    <div className={`player ${playing ? 'is-playing' : ''}`}>
-      <Thumb asset={{ ...a, duration: 0 }} className="player-frame" />
-      <span className="vf-corner tl" aria-hidden="true" />
-      <span className="vf-corner tr" aria-hidden="true" />
-      <span className="vf-corner bl" aria-hidden="true" />
-      <span className="vf-corner br" aria-hidden="true" />
-      <div className="player-meta" aria-hidden="true">
-        <span>{a.type === 'video' ? `${a.resolution.replace(' × ', '×')} · AV1` : a.type === 'audio' ? 'Opus · 160 kbps' : 'AVIF · 6000 px'}</span>
-        <span>{tc(t)}</span>
-      </div>
-      {a.type !== 'image' && (
-        <>
-          <button type="button" className="player-play" aria-label={playing ? 'Pause preview' : 'Play preview'} onClick={() => setPlaying((p) => !p)}>
-            <Icon name={playing ? 'pause' : 'play'} size={22} />
-          </button>
-          <div className="player-bar">
-            <div
-              className="scrub"
-              role="slider"
-              tabIndex={0}
-              aria-label="Seek"
-              aria-valuemin={0}
-              aria-valuemax={Math.round(len)}
-              aria-valuenow={Math.round(t)}
-              aria-valuetext={`${fmtDuration(Math.round(t))} of ${fmtDuration(len)}`}
-              onPointerDown={(e) => {
-                e.currentTarget.setPointerCapture(e.pointerId)
-                seek(e)
-              }}
-              onPointerMove={(e) => e.buttons === 1 && seek(e)}
-              onKeyDown={(e) => {
-                if (e.key === 'ArrowRight') setT((x) => Math.min(len, x + 5))
-                if (e.key === 'ArrowLeft') setT((x) => Math.max(0, x - 5))
-              }}
-            >
-              <i style={{ width: `${(t / len) * 100}%` }} />
-              <b style={{ left: `${(t / len) * 100}%` }} />
-            </div>
-            <span>
-              {fmtDuration(Math.round(t)) === '—' ? '0:00' : fmtDuration(Math.round(t))} / {fmtDuration(len)}
-            </span>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-function ladder(id: string) {
-  const a = getAsset(id)!
-  if (a.type === 'audio')
-    return [
-      ['Opus', '160 kbps', 'Stereo', a.duration * 20000],
-      ['AAC-LC', '256 kbps', 'Stereo', a.duration * 32000],
-      ['AAC-LC', '96 kbps', 'Stereo', a.duration * 12000],
-    ] as const
-  if (a.type === 'image')
-    return [
-      ['AVIF', '3840 px', 'q 62', 1.9e6 * 214],
-      ['WebP', '1920 px', 'q 75', 0.6e6 * 214],
-      ['JPEG', '640 px', 'q 80', 0.12e6 * 214],
-    ] as const
-  const four = a.resolution.startsWith('3840')
-  const rows: [string, string, string, number][] = []
-  ;(four ? [2160, 1440, 1080, 720, 480, 360] : [1080, 720, 480, 360]).forEach((h) => {
-    const kbps = { 2160: 14000, 1440: 8000, 1080: 4500, 720: 2500, 480: 1100, 360: 600 }[h]!
-    rows.push([h >= 1440 ? 'AV1' : 'AV1 + H.264', `${h}p`, `${(kbps / 1000).toFixed(1)} Mbps`, (a.duration * kbps * 1000) / 8])
-  })
-  return rows
-}
-
-const CAPTIONS = [
-  { lang: 'English', code: 'EN', source: 'Auto · 98.6% confidence', status: 'ready' as const },
-  { lang: 'Spanish', code: 'ES', source: 'Translated', status: 'ready' as const },
-  { lang: 'Japanese', code: 'JA', source: 'Translated', status: 'ready' as const },
-  { lang: 'French', code: 'FR', source: 'Translating', status: 'processing' as const },
-]
+type Tab = 'renditions' | 'embed'
 
 export default function AssetDetail({ id }: { id: string }) {
-  const a = getAsset(id)!
+  const { get, loaded, remove, update, retry } = useMedia()
+  const a = get(id)
   const router = useRouter()
-  const [tab, setTab] = useState<Tab>(a.status === 'ready' ? 'analytics' : 'renditions')
+  const [tab, setTab] = useState<Tab>('renditions')
   const [more, setMore] = useState(false)
   const [confirm, setConfirm] = useState(false)
-  const [table, setTable] = useState(false)
-  const playback = `https://play.mediaex.io/${a.id.slice(0, 4)}${a.thumb}f2c91e`
-  const embed = `<iframe src="${playback}/embed" width="100%" style="aspect-ratio:16/9;border:0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`
-  const views = series(200 + a.thumb, 30, Math.max(40, a.views / 60), { trend: 0.01 })
-  const stage = a.status === 'processing' ? Math.floor((a.progress / 100) * PIPELINE.length) : -1
+  const [renaming, setRenaming] = useState(false)
+  const [title, setTitle] = useState('')
+  const [tagInput, setTagInput] = useState<string | null>(null)
+  const [origin, setOrigin] = useState('')
+  useEffect(() => setOrigin(window.location.origin), [])
+
+  if (!a) {
+    return (
+      <div className="empty">
+        <Icon name="library" size={22} />
+        <b>{loaded ? 'This asset was deleted or moved' : 'Loading…'}</b>
+        <Link href="/dashboard/library" className="btn btn-ghost btn-sm">
+          Back to the library
+        </Link>
+      </div>
+    )
+  }
+
+  const watch = `${origin}/embed/${a.id}`
+  const stream = a.playbackUrl ? `${origin}${a.playbackUrl}` : ''
+  const embed = `<iframe src="${watch}" width="100%" style="aspect-ratio:16/9;border:0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`
+  const ready = a.status === 'ready'
+
+  const saveTags = async (next: string[]) => {
+    if (await update(a.id, { tags: next })) setTagInput(null)
+  }
 
   return (
     <>
@@ -149,30 +61,41 @@ export default function AssetDetail({ id }: { id: string }) {
               <TypeIcon type={a.type} />
               {a.type[0].toUpperCase() + a.type.slice(1)}
             </span>
-            <span>{a.resolution}</span>
-            {a.duration > 0 && <span>{fmtDuration(a.duration)}</span>}
+            {a.width && <span>{dims(a)}</span>}
+            {a.duration > 0 && <span>{fmtDuration(Math.round(a.duration))}</span>}
             <span>{bytes(a.size)}</span>
           </div>
         </div>
         <div className="page-actions">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(playback, 'Playback URL copied')}>
-            <Icon name="link" size={15} /> Copy link
-          </button>
-          <button type="button" className="btn btn-primary btn-sm" onClick={() => copyText(`${playback}/review`, 'Review link copied — anyone with it can comment')}>
-            Share for review
-          </button>
+          {ready && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(watch, 'Share link copied — anyone with it can watch')}>
+              <Icon name="link" size={15} /> Copy share link
+            </button>
+          )}
+          {ready && (
+            <a href={`/embed/${a.id}`} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">
+              Open player <Icon name="external" size={14} />
+            </a>
+          )}
           <div className="menu-wrap">
             <button type="button" className="icon-btn" aria-label="More actions" aria-haspopup="menu" aria-expanded={more} onClick={() => setMore((m) => !m)}>
               <Icon name="more" />
             </button>
             {more && (
               <div className="menu menu-right" role="menu" onMouseLeave={() => setMore(false)}>
-                <button type="button" role="menuitem" onClick={() => (setMore(false), toast('Download links need the backend'))}>
-                  <Icon name="file" size={15} /> Download original
+                <button type="button" role="menuitem" onClick={() => (setMore(false), setTitle(a.title), setRenaming(true))}>
+                  <Icon name="settings" size={15} /> Rename
                 </button>
-                <button type="button" role="menuitem" onClick={() => (setMore(false), toast(`Re-running the pipeline for “${a.title}”`))}>
-                  <Icon name="refresh" size={15} /> Re-run pipeline
-                </button>
+                {a.status !== 'uploading' && (
+                  <a role="menuitem" href={`/api/media/${a.id}/original`} onClick={() => setMore(false)}>
+                    <Icon name="file" size={15} /> Download original
+                  </a>
+                )}
+                {(a.status === 'ready' || a.status === 'failed') && (
+                  <button type="button" role="menuitem" onClick={() => (setMore(false), void retry(a.id))}>
+                    <Icon name="refresh" size={15} /> Re-run pipeline
+                  </button>
+                )}
                 <hr />
                 <button type="button" role="menuitem" className="is-danger" onClick={() => (setMore(false), setConfirm(true))}>
                   <Icon name="trash" size={15} /> Delete asset
@@ -187,155 +110,111 @@ export default function AssetDetail({ id }: { id: string }) {
         <div className="banner is-bad" role="alert">
           <Icon name="alert" />
           <div>
-            <b>Packaging failed at 92%.</b> The source has a variable frame rate between 00:41:10 and 00:41:52, which HLS packaging rejects.
+            <b>Processing failed.</b> {a.error ?? 'FFmpeg couldn’t process this file.'}
+            <small>The original is still stored. Re-run the pipeline after fixing the cause, or download the original.</small>
           </div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => toast('Retrying with frame-rate conform enabled')}>
-            Retry with conform
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => void retry(a.id)}>
+            Try again
           </button>
         </div>
       )}
 
       <div className="asset-layout">
         <div className="stack">
-          <Player id={a.id} />
+          <MediaPlayer asset={a} />
 
-          {a.status === 'processing' && (
-            <Card title="Pipeline" meta={`${a.progress}% · about ${Math.max(1, Math.round((100 - a.progress) / 9))} min left`}>
-              <div className="stages stages-lg">
-                {PIPELINE.map((s, i) => (
-                  <span key={s} className={i < stage ? 'is-done' : i === stage ? 'is-now' : ''}>
-                    <i />
-                    {s}
-                  </span>
-                ))}
+          {isActive(a) && (
+            <Card title="Pipeline" meta={a.status === 'uploading' ? 'Uploading' : a.status === 'queued' ? 'Waiting for an encoder' : `${Math.round(a.progress)}%`}>
+              <div className="stages stages-lg stages-4">
+                {STAGES.map((s, i) => {
+                  const now = a.status === 'uploading' ? 0 : a.status === 'queued' ? -1 : a.stage
+                  const done = a.status === 'queued' ? i === 0 : i < now
+                  return (
+                    <span key={s} className={done ? 'is-done' : i === now ? 'is-now' : ''}>
+                      <i />
+                      {s}
+                    </span>
+                  )
+                })}
               </div>
             </Card>
           )}
 
-          <div>
-            <Tabs
-              value={tab}
-              onChange={setTab}
-              tabs={[
-                { value: 'analytics', label: 'Analytics' },
-                { value: 'renditions', label: 'Renditions', count: ladder(a.id).length },
-                ...(a.type !== 'image' ? [{ value: 'captions' as Tab, label: 'Captions', count: CAPTIONS.length }] : []),
-                { value: 'embed', label: 'Embed' },
-              ]}
-            />
+          {(ready || a.renditions.length > 0) && (
+            <div>
+              <Tabs
+                value={tab}
+                onChange={setTab}
+                tabs={[
+                  { value: 'renditions', label: 'Renditions', count: a.renditions.length },
+                  ...(ready && a.type !== 'image' ? [{ value: 'embed' as Tab, label: 'Embed' }] : []),
+                ]}
+              />
 
-            {tab === 'analytics' &&
-              (a.views ? (
-                <div className="stack">
-                  <Card title="Views" meta="Last 30 days" action={<ViewToggle table={table} onChange={setTable} />}>
-                    <LineChart points={views} label={`Daily views of ${a.title}, last 30 days`} height={220} table={table} yHead="Views" />
-                  </Card>
-                  {a.type !== 'image' && (
-                    <Card title="Audience retention" meta="Share of viewers still watching">
-                      <LineChart
-                        points={RETENTION}
-                        label="Audience retention across the asset"
-                        height={200}
-                        yMax={100}
-                        format={(v) => `${v}% still watching`}
-                        axisFormat={(v) => `${v}%`}
-                        area={false}
-                        table={table}
-                        xHead="Position"
-                        yHead="Still watching"
-                      />
-                    </Card>
-                  )}
-                </div>
-              ) : (
-                <Card>
-                  <div className="empty">
-                    <Icon name="analytics" size={22} />
-                    <b>No views yet</b>
-                    <p>Analytics appear as soon as the asset is ready and someone presses play.</p>
-                  </div>
-                </Card>
-              ))}
-
-            {tab === 'renditions' && (
-              <Card flush>
-                <div className="table-wrap">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Codec</th>
-                        <th>{a.type === 'audio' ? 'Bitrate' : a.type === 'image' ? 'Width' : 'Resolution'}</th>
-                        <th>{a.type === 'video' ? 'Bitrate' : 'Profile'}</th>
-                        <th className="num">Size</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ladder(a.id).map((r, i) => (
-                        <tr key={`${r[0]}-${r[1]}`}>
-                          <td>{r[0]}</td>
-                          <td className="mono">{r[1]}</td>
-                          <td className="mono">{r[2]}</td>
-                          <td className="num mono">{bytes(r[3])}</td>
-                          <td>
-                            <StatusBadge
-                              status={a.status === 'ready' ? 'ready' : a.status === 'failed' ? (i === 0 ? 'failed' : 'ready') : i < 2 ? 'ready' : a.status === 'queued' ? 'queued' : 'processing'}
-                            />
-                          </td>
+              {tab === 'renditions' && (
+                <Card flush>
+                  <div className="table-wrap">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Rendition</th>
+                          <th>Codec</th>
+                          <th className="num">Size</th>
+                          <th className="num">Bitrate</th>
+                          <th className="num">File size</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
-            )}
-
-            {tab === 'captions' && (
-              <Card
-                flush
-                title="Caption tracks"
-                action={
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => toast('Adding languages needs the backend')}>
-                    <Icon name="plus" size={15} /> Add language
-                  </button>
-                }
-              >
-                <ul className="rows">
-                  {CAPTIONS.map((c) => (
-                    <li key={c.code}>
-                      <span className="lang-code">{c.code}</span>
-                      <div>
-                        <b>{c.lang}</b>
-                        <small>{c.source}</small>
-                      </div>
-                      <StatusBadge status={c.status} />
-                    </li>
-                  ))}
-                </ul>
-              </Card>
-            )}
-
-            {tab === 'embed' && (
-              <div className="stack">
-                <Card title="Playback URL" meta="HLS + DASH, adaptive">
-                  <div className="copy-row">
-                    <code>{playback}</code>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(playback, 'Playback URL copied')}>
-                      <Icon name="copy" size={15} /> Copy
-                    </button>
+                      </thead>
+                      <tbody>
+                        {a.renditions.map((r) => (
+                          <tr key={r.name}>
+                            <td className="cell-strong">{r.name}</td>
+                            <td className="muted">{r.codec}</td>
+                            <td className="num">{r.width ? (r.height ? `${r.width} × ${r.height}` : `${r.width} px`) : '—'}</td>
+                            <td className="num">{r.bitrate ? `${r.bitrate >= 1e6 ? (r.bitrate / 1e6).toFixed(1) + ' Mbps' : Math.round(r.bitrate / 1000) + ' kbps'}` : '—'}</td>
+                            <td className="num">{bytes(r.size)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </Card>
-                <Card title="Embed code" meta="Responsive iframe">
-                  <pre className="snippet">
-                    <code>{embed}</code>
-                  </pre>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(embed, 'Embed code copied')}>
-                    <Icon name="copy" size={15} /> Copy embed code
-                  </button>
-                </Card>
-              </div>
-            )}
-          </div>
+              )}
+
+              {tab === 'embed' && (
+                <div className="stack">
+                  <Card title="Share link" meta="Anyone with the link can watch">
+                    <div className="copy-row">
+                      <code>{watch}</code>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(watch, 'Share link copied')}>
+                        <Icon name="copy" size={15} /> Copy
+                      </button>
+                    </div>
+                  </Card>
+                  <Card title="HLS stream" meta="For your own player">
+                    <div className="copy-row">
+                      <code>{stream}</code>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(stream, 'Stream URL copied')}>
+                        <Icon name="copy" size={15} /> Copy
+                      </button>
+                    </div>
+                  </Card>
+                  <Card
+                    title="Embed code"
+                    meta="Responsive iframe"
+                    action={
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(embed, 'Embed code copied')}>
+                        <Icon name="copy" size={15} /> Copy
+                      </button>
+                    }
+                  >
+                    <pre className="snippet">
+                      <code>{embed}</code>
+                    </pre>
+                  </Card>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <aside className="stack">
@@ -343,50 +222,98 @@ export default function AssetDetail({ id }: { id: string }) {
             <dl className="details">
               <div>
                 <dt>Asset ID</dt>
-                <dd className="mono">ast_{a.id.slice(0, 6)}{a.thumb}</dd>
+                <dd className="mono">{a.id}</dd>
               </div>
               <div>
-                <dt>Source</dt>
-                <dd>{a.codec}</dd>
+                <dt>Original file</dt>
+                <dd>{a.fileName}</dd>
               </div>
+              {a.sourceInfo && (
+                <div>
+                  <dt>Source</dt>
+                  <dd>{a.sourceInfo}</dd>
+                </div>
+              )}
               <div>
                 <dt>Uploaded</dt>
                 <dd>
-                  {dayLabel(a.createdDaysAgo)} · Ada Okafor
+                  <Ago iso={a.createdAt} />
+                  {a.createdBy ? ` · ${a.createdBy}` : ''}
                 </dd>
               </div>
               <div>
-                <dt>Views</dt>
-                <dd>{a.views ? a.views.toLocaleString('en-US') : '—'}</dd>
-              </div>
-              <div>
-                <dt>Watch time</dt>
-                <dd>{a.watchHours ? `${compact(a.watchHours)} hours` : '—'}</dd>
+                <dt>Stored</dt>
+                <dd>
+                  {bytes(a.size)} original{a.outputSize ? ` + ${bytes(a.outputSize)} outputs` : ''}
+                </dd>
               </div>
               <div>
                 <dt>Access</dt>
-                <dd>Public · signed URLs off</dd>
+                <dd>Anyone with the link can watch · original is members-only</dd>
               </div>
             </dl>
           </Card>
           <Card title="Tags">
             <div className="tags">
               {a.tags.map((t) => (
-                <span key={t}>{t}</span>
+                <button key={t} type="button" className="tag" title={`Remove ${t}`} onClick={() => void saveTags(a.tags.filter((x) => x !== t))}>
+                  {t} <Icon name="x" size={12} />
+                </button>
               ))}
-              <button type="button" onClick={() => toast('Editing tags needs the backend')}>
-                <Icon name="plus" size={13} /> Add
-              </button>
+              {tagInput === null ? (
+                <button type="button" className="tag-add" onClick={() => setTagInput('')}>
+                  <Icon name="plus" size={13} /> Add
+                </button>
+              ) : (
+                <form
+                  className="tag-form"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    const t = tagInput.trim()
+                    if (t) void saveTags([...a.tags, t])
+                    else setTagInput(null)
+                  }}
+                >
+                  <input className="input" autoFocus value={tagInput} maxLength={32} placeholder="New tag" aria-label="New tag" onChange={(e) => setTagInput(e.target.value)} onBlur={() => !tagInput.trim() && setTagInput(null)} />
+                </form>
+              )}
             </div>
           </Card>
         </aside>
       </div>
 
+      {renaming && (
+        <div className="dialog-scrim" onPointerDown={(e) => e.target === e.currentTarget && setRenaming(false)}>
+          <form
+            className="dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rename-title"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              if (title.trim() && (await update(a.id, { title: title.trim() }))) setRenaming(false)
+            }}
+          >
+            <h2 id="rename-title">Rename asset</h2>
+            <p>The title shows in your library and on the share page.</p>
+            <input className="input" style={{ width: '100%' }} value={title} maxLength={200} autoFocus onChange={(e) => setTitle(e.target.value)} aria-label="Title" />
+            <div className="dialog-foot">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRenaming(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary btn-sm" disabled={!title.trim()}>
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {confirm && (
         <div className="dialog-scrim" onPointerDown={(e) => e.target === e.currentTarget && setConfirm(false)}>
           <div className="dialog" role="alertdialog" aria-modal="true" aria-labelledby="del-title">
             <h2 id="del-title">Delete “{a.title}”?</h2>
-            <p>The original, every rendition and its caption tracks will be removed, and embeds will stop playing. This cannot be undone.</p>
+            <p>The original and every rendition are removed from storage, and share links and embeds stop playing. This can’t be undone.</p>
             <div className="dialog-foot">
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirm(false)} autoFocus>
                 Cancel
@@ -394,10 +321,9 @@ export default function AssetDetail({ id }: { id: string }) {
               <button
                 type="button"
                 className="btn btn-danger btn-sm"
-                onClick={() => {
+                onClick={async () => {
                   setConfirm(false)
-                  toast('Sample data can’t be deleted — this would remove the asset once the backend exists')
-                  router.push('/dashboard/library')
+                  if (await remove(a.id)) router.push('/dashboard/library')
                 }}
               >
                 Delete asset

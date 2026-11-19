@@ -1,19 +1,22 @@
 import type { Metadata } from 'next'
+import { headers } from 'next/headers'
 import { notFound } from 'next/navigation'
 import AssetDetail from '@/components/app/views/AssetDetail'
-import { ASSETS, getAsset } from '@/lib/sample'
+import { getAssetRow, isMemberOf } from '@/lib/media/assets'
 
-export function generateStaticParams() {
-  return ASSETS.map((a) => ({ id: a.id }))
+async function load(id: string) {
+  const row = await getAssetRow(id)
+  if (!row || !(await isMemberOf(await headers(), row.organizationId))) return null
+  return row
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params
-  return { title: getAsset(id)?.title ?? 'Asset not found' }
+  return { title: (await load(id))?.title ?? 'Asset not found' }
 }
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  if (!getAsset(id)) notFound()
+  if (!(await load(id))) notFound()
   return <AssetDetail id={id} />
 }

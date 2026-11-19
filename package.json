@@ -10,7 +10,9 @@
     "db:migrate": "node --env-file-if-exists=.env.local --experimental-strip-types --no-warnings scripts/migrate.mts"
   },
   "dependencies": {
+    "aws4fetch": "^1.0.20",
     "better-auth": "^1.7.26",
+    "hls.js": "^1.7.4",
     "next": "^16.4.6",
     "pg": "^8.23.1",
     "react": "^19.3.1",

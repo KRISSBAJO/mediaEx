@@ -3,6 +3,7 @@ import { headers } from 'next/headers'
 import type { Account, Role } from '@/components/app/account'
 import Shell from '@/components/app/Shell'
 import { auth, createPersonalWorkspace, pool } from '@/lib/auth'
+import { listAssets, toDTO } from '@/lib/media/assets'
 import { requireSession } from '@/lib/session'
 import './dashboard.css'
 
@@ -50,5 +51,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
     workspaces: orgs.map((o) => ({ id: o.id, name: o.name, slug: o.slug, initial: o.name[0]?.toUpperCase() ?? 'W' })),
   }
 
-  return <Shell account={account}>{children}</Shell>
+  const initialAssets = (await listAssets(active.id)).map(toDTO)
+
+  return (
+    <Shell account={account} initialAssets={initialAssets}>
+      {children}
+    </Shell>
+  )
 }

@@ -1,0 +1,8 @@
+node_modules
+.next
+.npm-cache
+.media
+.mailbox
+.env*
+!.env.example
+*.log
