@@ -137,7 +137,15 @@ export default function Uploads() {
         </div>
 
         <div className="stack">
-          <Card title="Defaults for new uploads">
+          <Card
+            title="Defaults for new uploads"
+            hint="Applies to files you add next"
+            footer={
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => toast('Upload defaults saved for this session')}>
+                Save defaults
+              </button>
+            }
+          >
             <div className="form-stack">
               <label className="field-d">
                 <span>Encoding ladder</span>
@@ -163,9 +171,6 @@ export default function Uploads() {
                   <small>Playback needs a token from your server.</small>
                 </span>
               </label>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => toast('Upload defaults saved for this session')}>
-                Save defaults
-              </button>
             </div>
           </Card>
 
@@ -180,13 +185,20 @@ export default function Uploads() {
               }}
             >
               <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://… or s3://bucket/key" aria-label="Media URL" />
-              <button type="submit" className="btn btn-ghost btn-sm">
+              <button type="submit" className="btn btn-ghost">
                 Import
               </button>
             </form>
           </Card>
 
-          <Card title="From the command line">
+          <Card
+            title="From the command line"
+            action={
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText('npm i -g @mediaex/cli && mx upload ./footage --watch', 'Command copied')}>
+                <Icon name="copy" size={15} /> Copy
+              </button>
+            }
+          >
             <pre className="snippet">
               <code>
                 <span className="cm"># install once</span>
@@ -195,9 +207,6 @@ export default function Uploads() {
                 {'\n'}mx upload ./footage --watch
               </code>
             </pre>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText('npm i -g @mediaex/cli && mx upload ./footage --watch', 'Command copied')}>
-              <Icon name="copy" size={15} /> Copy
-            </button>
           </Card>
         </div>
       </div>

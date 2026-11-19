@@ -45,7 +45,7 @@ export default function Analytics() {
             <option value="trailer-nightjar">Trailer — Nightjar</option>
           </select>
         </label>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTable((t) => !t)}>
+        <button type="button" className="btn btn-ghost" onClick={() => setTable((t) => !t)}>
           <Icon name={table ? 'analytics' : 'list'} size={15} /> {table ? 'Show charts' : 'Show tables'}
         </button>
       </div>

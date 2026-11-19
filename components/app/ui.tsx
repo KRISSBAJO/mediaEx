@@ -88,6 +88,8 @@ export function Card({
   children,
   className = '',
   flush,
+  hint,
+  footer,
 }: {
   title?: React.ReactNode
   meta?: React.ReactNode
@@ -95,6 +97,10 @@ export function Card({
   children: React.ReactNode
   className?: string
   flush?: boolean
+  /** left side of the footer bar */
+  hint?: React.ReactNode
+  /** right side of the footer bar (buttons) */
+  footer?: React.ReactNode
 }) {
   return (
     <section className={`panel ${flush ? 'is-flush' : ''} ${className}`}>
@@ -108,6 +114,12 @@ export function Card({
         </header>
       )}
       {children}
+      {(hint || footer) && (
+        <footer className="panel-foot">
+          {hint && <span>{hint}</span>}
+          {footer && <div>{footer}</div>}
+        </footer>
+      )}
     </section>
   )
 }

@@ -7,7 +7,7 @@ import { authClient, authMessage } from '@/lib/auth-client'
 import { USAGE } from '@/lib/sample'
 import { canManage, useAccount, type Role } from '../account'
 import Icon from '../Icon'
-import { Avatar, Card, Meter, PageHead, Tabs, toast } from '../ui'
+import { Avatar, Card, Meter, PageHead, toast } from '../ui'
 
 type Tab = 'general' | 'team' | 'account' | 'billing'
 const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' }
@@ -73,13 +73,31 @@ function General() {
 
   return (
     <div className="stack">
-      <Card title="Workspace" meta={manage ? undefined : 'Only owners and admins can change these'}>
-        <form className="form-stack narrow" onSubmit={save} noValidate>
-          <label className="field-d">
+      <Card
+        title="Workspace"
+        hint={!manage ? 'Only owners and admins can change these.' : err ? <span className="is-bad">{err}</span> : 'Changes apply for everyone in the workspace.'}
+        footer={
+          manage && (
+            <>
+              {dirty && (
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => (setName(workspace.name), setSlug(workspace.slug), setErr(''))}>
+                  Discard
+                </button>
+              )}
+              <button type="submit" form="ws-form" className="btn btn-primary btn-sm" disabled={!dirty || !slugOk || !name.trim() || saving}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </>
+          )
+        }
+      >
+        <p className="setting-desc">The name your team sees in the workspace switcher and on invitations, and the address used for review links.</p>
+        <form id="ws-form" onSubmit={save} noValidate>
+          <label className="setting-field">
             <span>Name</span>
             <input className="input" value={name} disabled={!manage} onChange={(e) => (setName(e.target.value), setErr(''))} />
           </label>
-          <label className="field-d">
+          <label className="setting-field">
             <span>URL</span>
             <div className="input-prefix">
               <em>mediaex.io/</em>
@@ -91,34 +109,23 @@ function General() {
                 aria-invalid={!slugOk}
               />
             </div>
-            {!slugOk ? <small className="is-bad">Use 2–48 lowercase letters, numbers or dashes.</small> : err ? <small className="is-bad">{err}</small> : <small>Review links and the public player will use this address.</small>}
+            {!slugOk && <small className="is-bad">Use 2–48 lowercase letters, numbers or dashes.</small>}
           </label>
-          {manage && (
-            <div className="form-actions">
-              <button type="submit" className="btn btn-primary btn-sm" disabled={!dirty || !slugOk || !name.trim() || saving}>
-                {saving ? 'Saving…' : 'Save changes'}
-              </button>
-              {dirty && (
-                <button type="button" className="btn btn-quiet btn-sm" onClick={() => (setName(workspace.name), setSlug(workspace.slug), setErr(''))}>
-                  Discard
-                </button>
-              )}
-            </div>
-          )}
         </form>
       </Card>
 
       {workspace.role === 'owner' && (
-        <Card title="Danger zone" className="danger">
-          <div className="danger-row">
-            <div>
-              <b>Delete this workspace</b>
-              <p>Removes the workspace, its members and pending invitations. This can’t be undone.</p>
-            </div>
+        <Card
+          title="Delete workspace"
+          className="danger"
+          hint="This can’t be undone."
+          footer={
             <button type="button" className="btn btn-danger btn-sm" onClick={() => setDeleting(true)}>
               Delete workspace
             </button>
-          </div>
+          }
+        >
+          <p className="setting-desc">Permanently removes {workspace.name}, its members and pending invitations.</p>
         </Card>
       )}
 
@@ -207,8 +214,17 @@ function Team() {
   return (
     <div className="stack">
       {manage && (
-        <Card title="Invite people" meta="They get an email with a link to join">
-          <form className="invite" noValidate onSubmit={invite}>
+        <Card
+          title="Invite people"
+          hint={err ? <span className="is-bad">{err}</span> : `${ROLE_LABEL[role]}s: ${ROLE_HELP[role].toLowerCase()}.`}
+          footer={
+            <button type="submit" form="invite-form" className="btn btn-primary btn-sm" disabled={sending}>
+              {sending ? 'Sending…' : 'Send invite'}
+            </button>
+          }
+        >
+          <p className="setting-desc">They get an email with a link to join {workspace.name}. Invitations expire after 7 days.</p>
+          <form id="invite-form" className="invite" noValidate onSubmit={invite}>
             <input
               className="input grow"
               type="email"
@@ -222,11 +238,7 @@ function Team() {
               <option value="member">Member</option>
               <option value="admin">Admin</option>
             </select>
-            <button type="submit" className="btn btn-primary btn-sm" disabled={sending}>
-              {sending ? 'Sending…' : 'Send invite'}
-            </button>
           </form>
-          {err ? <small className="is-bad form-err">{err}</small> : <small className="form-hint">{ROLE_HELP[role]}.</small>}
         </Card>
       )}
 
@@ -247,7 +259,7 @@ function Team() {
                   <th>Member</th>
                   <th>Role</th>
                   <th>Joined</th>
-                  <th className="num">
+                  <th className="actions">
                     <span className="sr-only">Actions</span>
                   </th>
                 </tr>
@@ -281,7 +293,7 @@ function Team() {
                         )}
                       </td>
                       <td className="muted">{new Date(m.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                      <td className="num">
+                      <td className="actions">
                         {manage && !self && r !== 'owner' && (
                           <button type="button" className="btn btn-quiet btn-sm" onClick={() => remove(m)}>
                             Remove
@@ -368,36 +380,45 @@ function Account() {
 
   return (
     <div className="stack">
-      <Card title="Profile">
-        <form className="form-stack narrow" onSubmit={saveName}>
-          <label className="field-d">
+      <Card
+        title="Profile"
+        hint={user.emailVerified ? 'Email verified.' : 'Email not verified yet — check your inbox for the link.'}
+        footer={
+          <button type="submit" form="name-form" className="btn btn-primary btn-sm" disabled={savingName || !name.trim() || name.trim() === user.name}>
+            {savingName ? 'Saving…' : 'Save'}
+          </button>
+        }
+      >
+        <p className="setting-desc">How you appear to your team in workspaces, comments and invitations.</p>
+        <form id="name-form" onSubmit={saveName}>
+          <label className="setting-field">
             <span>Name</span>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
           </label>
-          <label className="field-d">
+          <label className="setting-field">
             <span>Email</span>
             <input className="input" value={user.email} disabled />
-            <small>{user.emailVerified ? 'Verified.' : 'Not verified yet — check your inbox for the link.'}</small>
           </label>
-          <button type="submit" className="btn btn-primary btn-sm" disabled={savingName || !name.trim() || name.trim() === user.name}>
-            {savingName ? 'Saving…' : 'Save name'}
-          </button>
         </form>
       </Card>
-      <Card title="Password">
-        <form className="form-stack narrow" onSubmit={savePw} noValidate>
-          <label className="field-d">
+      <Card
+        title="Password"
+        hint={pwErr ? <span className="is-bad">{pwErr}</span> : 'At least 8 characters. Changing it signs out your other devices.'}
+        footer={
+          <button type="submit" form="pw-form" className="btn btn-primary btn-sm" disabled={savingPw || !current || !next}>
+            {savingPw ? 'Changing…' : 'Change password'}
+          </button>
+        }
+      >
+        <form id="pw-form" onSubmit={savePw} noValidate>
+          <label className="setting-field">
             <span>Current password</span>
             <input className="input" type="password" autoComplete="current-password" value={current} onChange={(e) => (setCurrent(e.target.value), setPwErr(''))} />
           </label>
-          <label className="field-d">
+          <label className="setting-field">
             <span>New password</span>
             <input className="input" type="password" autoComplete="new-password" value={next} onChange={(e) => (setNext(e.target.value), setPwErr(''))} />
-            {pwErr ? <small className="is-bad">{pwErr}</small> : <small>At least 8 characters. Changing it signs out your other devices.</small>}
           </label>
-          <button type="submit" className="btn btn-ghost btn-sm" disabled={savingPw || !current || !next}>
-            {savingPw ? 'Changing…' : 'Change password'}
-          </button>
         </form>
       </Card>
     </div>
@@ -420,41 +441,48 @@ function Billing() {
           <b>Billing isn’t connected yet.</b> Every workspace is on the free plan for now. The usage below is sample data.
         </div>
       </div>
-      <div className="grid-2">
-        <Card title="Usage this cycle" meta="Sample data">
-          <ul className="usage-list">
-            {rows.map((r) => (
-              <li key={r.label}>
-                <div className="usage-row">
-                  <span>{r.label}</span>
-                  <b>
-                    {r.used.toLocaleString('en-US')} / {r.limit.toLocaleString('en-US')} {r.unit}
-                  </b>
-                </div>
-                <Meter value={r.used} max={r.limit} />
-              </li>
-            ))}
-          </ul>
-        </Card>
-        <Card title="Plan">
-          <div className="plan-now">
-            <span className="plan-name">Free</span>
-            <div className="plan-cost">
-              <strong>$0</strong>
-              <span>/ month</span>
-            </div>
-            <p>Paid plans unlock once billing is connected. Compare plans on the pricing page.</p>
-            <div className="form-actions">
-              <Link href="/#pricing" className="btn btn-ghost btn-sm">
-                See plans
-              </Link>
-            </div>
+      <Card
+        title="Plan"
+        hint="Paid plans unlock once billing is connected."
+        footer={
+          <Link href="/#pricing" className="btn btn-ghost btn-sm">
+            Compare plans
+          </Link>
+        }
+      >
+        <div className="plan-now">
+          <span className="plan-name">Free</span>
+          <div className="plan-cost">
+            <strong>$0</strong>
+            <span>/ month</span>
           </div>
-        </Card>
-      </div>
+        </div>
+      </Card>
+      <Card title="Usage this cycle" meta="Sample data">
+        <ul className="usage-grid">
+          {rows.map((r) => (
+            <li key={r.label}>
+              <div className="usage-row">
+                <span>{r.label}</span>
+                <b>
+                  {r.used.toLocaleString('en-US')} / {r.limit.toLocaleString('en-US')} {r.unit}
+                </b>
+              </div>
+              <Meter value={r.used} max={r.limit} />
+            </li>
+          ))}
+        </ul>
+      </Card>
     </div>
   )
 }
+
+const SECTIONS: { value: Tab; label: string; icon: string }[] = [
+  { value: 'general', label: 'Workspace', icon: 'layers' },
+  { value: 'team', label: 'Team', icon: 'users' },
+  { value: 'account', label: 'Account', icon: 'settings' },
+  { value: 'billing', label: 'Billing', icon: 'card' },
+]
 
 export default function Settings() {
   const params = useSearchParams()
@@ -466,20 +494,27 @@ export default function Settings() {
   return (
     <>
       <PageHead title="Settings" sub={`${workspace.name} · you are ${workspace.role === 'admin' || workspace.role === 'owner' ? 'an' : 'a'} ${ROLE_LABEL[workspace.role].toLowerCase()}`} />
-      <Tabs
-        value={tab}
-        onChange={(t) => router.replace(t === 'general' ? '/dashboard/settings' : `/dashboard/settings?tab=${t}`, { scroll: false })}
-        tabs={[
-          { value: 'general', label: 'Workspace' },
-          { value: 'team', label: 'Team' },
-          { value: 'account', label: 'Account' },
-          { value: 'billing', label: 'Billing' },
-        ]}
-      />
-      {tab === 'general' && <General />}
-      {tab === 'team' && <Team />}
-      {tab === 'account' && <Account />}
-      {tab === 'billing' && <Billing />}
+      <div className="settings">
+        <nav className="settings-nav" aria-label="Settings sections">
+          {SECTIONS.map((x) => (
+            <button
+              key={x.value}
+              type="button"
+              aria-current={tab === x.value ? 'page' : undefined}
+              onClick={() => router.replace(x.value === 'general' ? '/dashboard/settings' : `/dashboard/settings?tab=${x.value}`, { scroll: false })}
+            >
+              <Icon name={x.icon} size={16} />
+              {x.label}
+            </button>
+          ))}
+        </nav>
+        <div>
+          {tab === 'general' && <General />}
+          {tab === 'team' && <Team />}
+          {tab === 'account' && <Account />}
+          {tab === 'billing' && <Billing />}
+        </div>
+      </div>
     </>
   )
 }

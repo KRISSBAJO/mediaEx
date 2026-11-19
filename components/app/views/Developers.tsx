@@ -81,7 +81,7 @@ export default function Developers() {
                   <th>Scope</th>
                   <th>Created</th>
                   <th>Last used</th>
-                  <th className="num">
+                  <th className="actions">
                     <span className="sr-only">Actions</span>
                   </th>
                 </tr>
@@ -99,7 +99,7 @@ export default function Developers() {
                     <td className="muted">{k.scope}</td>
                     <td className="muted">{k.created}</td>
                     <td className="muted">{k.lastUsed}</td>
-                    <td className="num">
+                    <td className="actions">
                       <button type="button" className="btn btn-quiet btn-sm" onClick={() => setRevoke(k)}>
                         Revoke
                       </button>
@@ -111,7 +111,7 @@ export default function Developers() {
           </div>
         </Card>
 
-        <div className="grid-2">
+        <div className="grid-2 even">
           <Card
             title="Webhooks"
             meta={`${WEBHOOKS.length} endpoints`}
@@ -130,7 +130,7 @@ export default function Developers() {
                   </span>
                   <div className="grow">
                     <b className="mono-strong">{w.url}</b>
-                    <small>{w.events.join(' · ')}</small>
+                    <small className="mono">{w.events.join('  ')}</small>
                   </div>
                   <div className="row-end">
                     <span className={`dot-status ${w.status === 'healthy' ? 'is-good' : 'is-bad'}`}>{w.status === 'healthy' ? 'Healthy' : 'Failing'}</span>
@@ -141,7 +141,19 @@ export default function Developers() {
             </ul>
           </Card>
 
-          <Card title="Quickstart" meta="Node.js">
+          <Card
+            title="Quickstart"
+            meta="Node.js"
+            action={
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => copyText("import { MediaEX } from '@mediaex/sdk'\n\nconst mx = new MediaEX({ apiKey: process.env.MEDIAEX_KEY })\nconst { data } = await mx.assets.list({ limit: 10 })", 'Snippet copied')}
+              >
+                <Icon name="copy" size={15} /> Copy
+              </button>
+            }
+          >
             <pre className="snippet">
               <code>
                 <span className="k">import</span> {'{ MediaEX }'} <span className="k">from</span> <span className="s">&apos;@mediaex/sdk&apos;</span>
@@ -151,18 +163,6 @@ export default function Developers() {
                 <span className="k">const</span> {'{ data }'} = <span className="k">await</span> mx.assets.list({'{'} limit: <span className="s">10</span> {'}'})
               </code>
             </pre>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() =>
-                copyText(
-                  "import { MediaEX } from '@mediaex/sdk'\n\nconst mx = new MediaEX({ apiKey: process.env.MEDIAEX_KEY })\nconst { data } = await mx.assets.list({ limit: 10 })",
-                  'Snippet copied',
-                )
-              }
-            >
-              <Icon name="copy" size={15} /> Copy
-            </button>
           </Card>
         </div>
 
