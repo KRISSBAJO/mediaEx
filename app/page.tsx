@@ -110,7 +110,7 @@ export default function Home() {
         {/* ---------------- BRANDS ---------------- */}
         <section className="brands" aria-label="Customers">
           <div className="brands-inner">
-            <p className="mono-label">In use at 40,000+ studios, labels and channels</p>
+            <p className="brands-label">In use at 40,000+ studios, labels and channels</p>
             <div className="marquee">
               <div className="marquee-track">
                 {[...BRANDS, ...BRANDS].map((b, i) => (
@@ -302,7 +302,9 @@ export default function Home() {
                 Three steps. <span className="grad-text">No render queue.</span>
               </>
             }
-          />
+          >
+            Upload from anywhere, let the pipeline do the work in parallel, and ship one playback URL to every screen.
+          </SectionHead>
           <div className="steps" data-progress>
             <div className="steps-line">
               <i />
@@ -338,19 +340,32 @@ export default function Home() {
 
         {/* ---------------- DEVELOPERS ---------------- */}
         <section className="section" id="developers">
-          <SectionHead index="04" label="Developers" note="REST · GraphQL · Webhooks" />
+          <SectionHead
+            index="04"
+            label="Developers"
+            note="REST · GraphQL · Webhooks"
+            title={
+              <>
+                Ship video features <span className="grad-text">in an afternoon.</span>
+              </>
+            }
+          >
+            A typed SDK, REST and GraphQL APIs, webhooks for every event and a drop-in player that works everywhere.
+          </SectionHead>
           <div className="dev">
             <div className="dev-copy" data-reveal>
-              <h2>
-                Ship video features <span className="grad-text">in an afternoon.</span>
-              </h2>
-              <p>A typed SDK, REST and GraphQL APIs, webhooks for every event and a drop-in player that works everywhere.</p>
               <ul className="dev-list">
-                {['SDKs for JavaScript, Swift, Kotlin and Python', 'Signed URLs, DRM and token auth', 'Webhooks for every pipeline event', 'Open-source, themeable player'].map(
-                  (x) => (
-                    <li key={x}>{x}</li>
-                  ),
-                )}
+                {[
+                  ['SDKs', 'Typed clients for JavaScript, Swift, Kotlin and Python.'],
+                  ['Security', 'Signed URLs, DRM and token auth on every plan.'],
+                  ['Webhooks', 'An event for every pipeline step, signed and retried.'],
+                  ['Player', 'Open source and themeable, on web, iOS and Android.'],
+                ].map(([t, x]) => (
+                  <li key={t}>
+                    <b>{t}</b>
+                    <span>{x}</span>
+                  </li>
+                ))}
               </ul>
               <a href="#pricing" className="link-arrow">
                 Read the docs <Arrow />
