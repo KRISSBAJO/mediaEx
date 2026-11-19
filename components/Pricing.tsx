@@ -49,25 +49,22 @@ export default function Pricing() {
 
   return (
     <>
-      <div className="billing" data-reveal>
-        <button className={!yearly ? 'is-active' : ''} onClick={() => setYearly(false)}>
+      <div className="billing" role="group" aria-label="Billing period" data-reveal>
+        <button type="button" aria-pressed={!yearly} className={!yearly ? 'is-active' : ''} onClick={() => setYearly(false)}>
           Monthly
         </button>
-        <button className={yearly ? 'is-active' : ''} onClick={() => setYearly(true)}>
+        <button type="button" aria-pressed={yearly} className={yearly ? 'is-active' : ''} onClick={() => setYearly(true)}>
           Yearly <span className="save">−20%</span>
         </button>
         <span className="billing-thumb" style={{ transform: `translateX(${yearly ? '100%' : '0'})` }} />
       </div>
-      <div className="plans">
+      <div className="grid-ruled plans">
         {PLANS.map((p, i) => (
-          <article
-            key={p.name}
-            className={`plan spot ${p.featured ? 'is-featured' : ''}`}
-            data-reveal
-            style={{ ['--d' as string]: `${i * 90}ms` }}
-          >
-            {p.featured && <span className="plan-tag">Most popular</span>}
-            <h3>{p.name}</h3>
+          <article key={p.name} className={`plan ${p.featured ? 'is-featured' : ''}`} data-reveal style={{ ['--d' as string]: `${i * 90}ms` }}>
+            <div className="plan-top">
+              <h3>{p.name}</h3>
+              {p.featured && <span className="plan-tag">Most popular</span>}
+            </div>
             <p className="plan-blurb">{p.blurb}</p>
             <div className="plan-price">
               <span className="cur">$</span>
@@ -82,12 +79,7 @@ export default function Pricing() {
             </a>
             <ul>
               {p.features.map((f) => (
-                <li key={f}>
-                  <svg viewBox="0 0 16 16" aria-hidden="true">
-                    <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  {f}
-                </li>
+                <li key={f}>{f}</li>
               ))}
             </ul>
           </article>
