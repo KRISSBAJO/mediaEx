@@ -5,18 +5,23 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Logo from '@/components/Logo'
 import { authClient, authMessage } from '@/lib/auth-client'
-import { ASSETS, USAGE, getAsset } from '@/lib/sample'
+import { isActive as inPipeline, type MediaAsset } from '@/lib/media/types'
+import { bytes } from '@/lib/sample'
 import { AccountProvider, useAccount, type Account } from './account'
+import { MediaProvider, useMedia } from './media'
 import Icon from './Icon'
 import { Avatar, Meter, Toaster, toast } from './ui'
+
+/** the Free plan's storage allowance (see pricing) */
+const FREE_STORAGE = 100 * 1e9
 
 const NAV = [
   {
     group: 'Workspace',
     items: [
       { href: '/dashboard', label: 'Overview', icon: 'overview' },
-      { href: '/dashboard/library', label: 'Library', icon: 'library', count: ASSETS.length },
-      { href: '/dashboard/uploads', label: 'Uploads', icon: 'upload', count: ASSETS.filter((a) => a.status === 'processing' || a.status === 'queued').length },
+      { href: '/dashboard/library', label: 'Library', icon: 'library' },
+      { href: '/dashboard/uploads', label: 'Uploads', icon: 'upload' },
       { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics' },
     ],
   },
@@ -76,7 +81,12 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
   }
   const wsRef = useOutside(ws, () => setWs(false))
   const meRef = useOutside(me, () => setMe(false))
-  const s = USAGE.storage
+  const { assets } = useMedia()
+  const counts: Record<string, number> = {
+    '/dashboard/library': assets.filter((a) => a.status !== 'uploading').length,
+    '/dashboard/uploads': assets.filter(inPipeline).length,
+  }
+  const used = assets.reduce((t, a) => t + a.size + a.outputSize, 0)
 
   return (
     <div className="side-inner">
@@ -128,7 +138,7 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
               >
                 <Icon name={it.icon} />
                 {it.label}
-                {'count' in it && it.count ? <em>{it.count}</em> : null}
+                {counts[it.href] ? <em>{counts[it.href]}</em> : null}
               </Link>
             ))}
           </div>
@@ -148,10 +158,10 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
           <div className="usage-row">
             <span>Storage</span>
             <b>
-              {s.used} / {s.limit} {s.unit}
+              {used ? bytes(used) : '0 GB'} / 100 GB
             </b>
           </div>
-          <Meter value={s.used} max={s.limit} />
+          <Meter value={used} max={FREE_STORAGE} />
           <Link href="/dashboard/settings?tab=billing" className="usage-link" onClick={onNavigate}>
             Manage plan <Icon name="arrowRight" size={13} />
           </Link>
@@ -194,6 +204,7 @@ function CommandMenu({ open, onClose }: { open: boolean; onClose: () => void }) 
   const [q, setQ] = useState('')
   const [i, setI] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const { assets } = useMedia()
 
   const cmds = useMemo<Cmd[]>(() => {
     const go = (href: string) => () => router.push(href)
@@ -202,9 +213,9 @@ function CommandMenu({ open, onClose }: { open: boolean; onClose: () => void }) 
       { id: 'a-upload', group: 'Actions', label: 'Upload files', icon: 'upload', hint: 'U', run: go('/dashboard/uploads') },
       { id: 'a-key', group: 'Actions', label: 'Create API key', icon: 'key', run: go('/dashboard/developers?new=1') },
       { id: 'a-invite', group: 'Actions', label: 'Invite a teammate', icon: 'users', run: go('/dashboard/settings?tab=team') },
-      ...ASSETS.map((a) => ({ id: a.id, group: 'Assets', label: a.title, icon: a.type, hint: a.status, run: go(`/dashboard/library/${a.id}`) })),
+      ...assets.map((a) => ({ id: a.id, group: 'Assets', label: a.title, icon: a.type, hint: a.status, run: go(`/dashboard/library/${a.id}`) })),
     ]
-  }, [router])
+  }, [router, assets])
 
   const list = useMemo(() => {
     const s = q.trim().toLowerCase()
@@ -296,20 +307,34 @@ function CommandMenu({ open, onClose }: { open: boolean; onClose: () => void }) 
 }
 
 /* ------------------------------------------------ top bar */
-function crumbs(path: string, workspaceName: string) {
+function crumbs(path: string, workspaceName: string, assets: MediaAsset[]) {
   const out: { href: string; label: string }[] = [{ href: '/dashboard', label: workspaceName }]
   const parts = path.split('/').filter(Boolean).slice(1)
   let href = '/dashboard'
   for (const p of parts) {
     href += `/${p}`
     const page = ALL_PAGES.find((x) => x.href === href)
-    out.push({ href, label: page?.label ?? getAsset(p)?.title ?? p })
+    out.push({ href, label: page?.label ?? assets.find((a) => a.id === p)?.title ?? 'Asset' })
   }
   if (out.length === 1) out.push({ href: '/dashboard', label: 'Overview' })
   return out
 }
 
-export default function Shell({ account, children }: { account: Account; children: React.ReactNode }) {
+export default function Shell({ account, initialAssets, children }: { account: Account; initialAssets: MediaAsset[]; children: React.ReactNode }) {
+  return (
+    <AccountProvider value={account}>
+      {/* keyed by workspace so switching workspaces starts from that workspace's media */}
+      <MediaProvider key={account.workspace.id} initial={initialAssets}>
+        <ShellInner>{children}</ShellInner>
+      </MediaProvider>
+    </AccountProvider>
+  )
+}
+
+function ShellInner({ children }: { children: React.ReactNode }) {
+  const account = useAccount()
+  const { assets } = useMedia()
+  const failed = assets.filter((a) => a.status === 'failed').length
   const path = usePathname()
   const [drawer, setDrawer] = useState(false)
   const [cmd, setCmd] = useState(false)
@@ -341,10 +366,9 @@ export default function Shell({ account, children }: { account: Account; childre
     }
   }, [drawer])
 
-  const trail = crumbs(path, account.workspace.name)
+  const trail = crumbs(path, account.workspace.name, assets)
 
   return (
-    <AccountProvider value={account}>
     <div className={`app ${drawer ? 'drawer-open' : ''}`}>
       <aside className="side" aria-label="Sidebar">
         <Sidebar onNavigate={() => setDrawer(false)} onNewWorkspace={() => setNewWs(true)} />
@@ -371,17 +395,22 @@ export default function Shell({ account, children }: { account: Account; childre
             ))}
           </nav>
           <div className="top-actions">
-            <span className="sample-pill" title="Your account, workspaces and team are real. Media, uploads and analytics are generated sample data until the media backend exists.">
-              Sample data
+            <span className="sample-pill" title="Your account, team and media are real. Analytics, API keys, webhooks and billing are sample data until those backends exist.">
+              Sample analytics
             </span>
             <button type="button" className="search-btn" onClick={() => setCmd(true)}>
               <Icon name="search" size={16} />
               <span>Search</span>
               <kbd>{mac ? '⌘' : 'Ctrl'} K</kbd>
             </button>
-            <button type="button" className="icon-btn" aria-label="Notifications, 2 unread" onClick={() => toast('2 unread: a failed packaging job and 3 new review comments')}>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={failed ? `Notifications, ${failed} unread` : 'Notifications'}
+              onClick={() => toast(failed ? `${failed} asset${failed > 1 ? 's' : ''} failed processing — see Library › Needs attention` : 'You’re all caught up')}
+            >
               <Icon name="bell" />
-              <i className="bell-dot" />
+              {failed > 0 && <i className="bell-dot" />}
             </button>
             <Link href="/dashboard/uploads" className="btn btn-primary btn-sm top-upload">
               <Icon name="upload" size={16} />
@@ -396,7 +425,6 @@ export default function Shell({ account, children }: { account: Account; childre
       {newWs && <NewWorkspace onClose={() => setNewWs(false)} />}
       <Toaster />
     </div>
-    </AccountProvider>
   )
 }
 

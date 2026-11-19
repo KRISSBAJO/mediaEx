@@ -8,6 +8,8 @@ COPY . .
 RUN npm run build && npm prune --omit=dev --offline --no-audit --no-fund
 
 FROM base AS runtime
+# the media pipeline runs ffmpeg and ffprobe
+RUN apk add --no-cache ffmpeg
 ENV NODE_ENV=production
 COPY --from=build /app ./
 CMD ["npm", "start"]

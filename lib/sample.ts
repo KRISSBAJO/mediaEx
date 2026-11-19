@@ -247,7 +247,10 @@ export function compact(n: number) {
 export function bytes(n: number) {
   if (n >= 1e12) return `${(n / 1e12).toFixed(2)} TB`
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`
-  return `${Math.round(n / 1e6)} MB`
+  if (n >= 1e7) return `${Math.round(n / 1e6)} MB`
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)} MB`
+  if (n >= 1e3) return `${Math.round(n / 1e3)} KB`
+  return `${Math.round(n)} B`
 }
 export function duration(s: number) {
   if (!s) return '—'

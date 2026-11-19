@@ -1,9 +1,10 @@
 /**
- * Creates or updates the auth tables (user, session, account, verification, organization, member, invitation).
- * Runs at backend startup and on demand with `npm run db:migrate`.
+ * Creates or updates the auth tables (user, session, account, verification, organization, member, invitation),
+ * then the media tables (asset). Runs at backend startup and on demand with `npm run db:migrate`. Safe to repeat.
  */
 import { getMigrations } from 'better-auth/db/migration'
 import { auth, pool } from './auth.mts'
+import { MEDIA_SCHEMA } from './media/schema.mts'
 
 if (!process.env.DATABASE_URL) {
   console.error('[migrate] DATABASE_URL is not set.')
@@ -18,4 +19,6 @@ if (!toBeCreated.length && !toBeAdded.length) {
   await runMigrations()
   console.log('[migrate] Done.')
 }
+await pool.query(MEDIA_SCHEMA)
+console.log('[migrate] Media tables are up to date.')
 await pool.end()
