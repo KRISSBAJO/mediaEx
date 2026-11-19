@@ -177,30 +177,37 @@ main,
   left: 0;
   right: 0;
   z-index: 50;
-  padding: 16px 20px;
-  transition: padding 0.4s var(--ease);
+  transition: transform 0.5s var(--ease);
+}
+/* background lives on a pseudo layer: a backdrop-filter on .nav itself would trap the fixed mobile sheet */
+.nav::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: rgb(var(--bg-rgb) / 0.78);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.nav.is-scrolled::before {
+  opacity: 1;
+}
+.nav.is-hidden {
+  transform: translateY(-100%);
 }
 .nav-inner {
-  max-width: 1200px;
+  position: relative;
+  z-index: 2;
+  max-width: 1280px;
+  height: 64px;
   margin: 0 auto;
+  padding: 0 24px;
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 10px 12px 10px 18px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  transition: background 0.4s, border-color 0.4s, box-shadow 0.4s;
-}
-.nav.is-scrolled {
-  padding-top: 10px;
-}
-.nav.is-scrolled .nav-inner,
-.nav.is-open .nav-inner {
-  background: rgb(var(--bg-rgb) / 0.72);
-  border-color: var(--line);
-  box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  gap: 40px;
 }
 .brand {
   display: inline-flex;
@@ -208,38 +215,58 @@ main,
   gap: 10px;
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 19px;
-  letter-spacing: -0.02em;
+  font-size: 18px;
+  letter-spacing: -0.03em;
 }
 .brand b {
   color: inherit;
 }
 .nav-links {
+  position: relative;
   display: flex;
-  gap: 4px;
-  margin-left: 12px;
+  align-self: stretch;
+  align-items: center;
+  gap: 28px;
 }
 .nav-links a {
-  padding: 8px 14px;
-  border-radius: 999px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 6px 0;
   color: var(--muted);
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 500;
-  transition: color 0.25s, background 0.25s;
+  transition: color 0.25s;
 }
-.nav-links a:hover {
+.nav-links a b {
+  font: 400 10.5px/1 var(--font-code);
+  color: var(--dim);
+  transition: color 0.25s;
+}
+.nav-links a:hover,
+.nav-links a.is-active {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.06);
+}
+.nav-links a.is-active b {
+  color: var(--accent);
+}
+.nav-underline {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--text);
+  transition: transform 0.5s var(--ease), width 0.5s var(--ease), opacity 0.3s;
+  pointer-events: none;
 }
 .nav-cta {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 18px;
 }
 .nav-signin {
-  padding: 8px 14px;
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--muted);
   transition: color 0.25s;
@@ -247,36 +274,62 @@ main,
 .nav-signin:hover {
   color: var(--text);
 }
+.nav-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  z-index: 3;
+  height: 1px;
+  background: var(--accent);
+  transform-origin: left;
+  transform: scaleX(var(--progress, 0));
+  opacity: 0;
+  transition: opacity 0.4s;
+  pointer-events: none;
+}
+.nav.is-scrolled .nav-progress {
+  opacity: 0.9;
+}
 .nav-burger {
   display: none;
+  position: relative;
   width: 40px;
   height: 40px;
-  border-radius: 50%;
+  border-radius: 8px;
   border: 1px solid var(--line-2);
-  background: rgba(255, 255, 255, 0.04);
-  position: relative;
+  background: none;
   cursor: pointer;
 }
 .nav-burger span {
   position: absolute;
-  left: 12px;
-  right: 12px;
-  height: 1.6px;
+  left: 11px;
+  right: 11px;
+  top: 50%;
+  height: 1.5px;
+  margin-top: -0.75px;
   background: var(--text);
-  border-radius: 2px;
-  transition: transform 0.35s var(--ease);
+  transition: transform 0.4s var(--ease);
 }
 .nav-burger span:first-child {
-  transform: translateY(-4px);
+  transform: translateY(-3.5px);
 }
 .nav-burger span:last-child {
-  transform: translateY(4px);
+  transform: translateY(3.5px);
 }
 .nav.is-open .nav-burger span:first-child {
   transform: rotate(45deg);
 }
 .nav.is-open .nav-burger span:last-child {
   transform: rotate(-45deg);
+}
+
+/* full-screen menu (phones) */
+.nav-sheet {
+  display: none;
+}
+section[id] {
+  scroll-margin-top: 72px;
 }
 
 /* ------------------------------------------------ hero: cinematic viewfinder */
@@ -1687,38 +1740,72 @@ html:not(.motion) .viz-chart i {
     margin-top: 36px;
   }
   .nav-links {
-    position: absolute;
-    top: calc(100% - 4px);
-    left: 20px;
-    right: 20px;
-    flex-direction: column;
-    gap: 2px;
-    margin: 0;
-    padding: 10px;
-    border-radius: 20px;
-    border: 1px solid var(--line);
-    background: rgb(var(--bg-rgb) / 0.94);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    opacity: 0;
-    transform: translateY(-8px);
-    pointer-events: none;
-    transition: opacity 0.3s, transform 0.4s var(--ease);
-  }
-  .nav.is-open .nav-links {
-    opacity: 1;
-    transform: none;
-    pointer-events: auto;
-  }
-  .nav-links a {
-    padding: 12px 14px;
-    font-size: 16px;
+    display: none;
   }
   .nav-burger {
     display: block;
   }
   .nav-signin {
     display: none;
+  }
+  .nav.is-open::before {
+    opacity: 1;
+  }
+  .nav-sheet {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    padding: 96px 24px 28px;
+    background: var(--bg);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.35s var(--ease), visibility 0s linear 0.35s;
+  }
+  .nav.is-open .nav-sheet {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.35s var(--ease);
+  }
+  .nav-sheet nav {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--line-2);
+  }
+  .nav-sheet nav a,
+  .nav-sheet-foot {
+    opacity: 0;
+    transform: translateY(14px);
+    transition: opacity 0.5s var(--ease), transform 0.6s var(--ease);
+  }
+  .nav.is-open .nav-sheet nav a,
+  .nav.is-open .nav-sheet-foot {
+    opacity: 1;
+    transform: none;
+    transition-delay: calc(80ms + var(--i) * 50ms);
+  }
+  .nav-sheet nav a {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 34px;
+    font-weight: 500;
+    letter-spacing: -0.045em;
+    line-height: 1.1;
+  }
+  .nav-sheet nav a b {
+    font: 400 12px/1 var(--font-code);
+    letter-spacing: 0;
+    color: var(--dim);
+  }
+  .nav-sheet-foot {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: auto;
   }
   .steps {
     grid-template-columns: 1fr;
@@ -1861,12 +1948,18 @@ html:not(.motion) .viz-chart i {
     gap: 16px;
     flex-wrap: wrap;
   }
-  .nav {
-    padding: 12px;
+  .nav-inner {
+    height: 58px;
+    padding: 0 16px;
   }
-  .nav-links {
-    left: 12px;
-    right: 12px;
+  .nav-cta {
+    gap: 10px;
+  }
+  .nav-sheet {
+    padding: 82px 16px 20px;
+  }
+  section[id] {
+    scroll-margin-top: 64px;
   }
 }
 
