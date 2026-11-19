@@ -40,6 +40,7 @@ test('the frontend forwards auth to its configured API and returns independent c
       forwarded: 'host=ignored.invalid',
       'x-forwarded-host': 'ignored.invalid',
       'x-mediaex-service-token': 'untrusted',
+      'x-mediaex-auth-cookie': 'untrusted=private',
     },
     body,
   })
@@ -57,9 +58,51 @@ test('the frontend forwards auth to its configured API and returns independent c
   assert.equal(received.headers.cookie, '__Secure-better-auth.session_token=fixture')
   assert.equal(received.headers['sec-fetch-site'], 'same-origin')
   assert.equal(received.headers['x-mediaex-service-token'], process.env.MEDIAEX_API_TOKEN)
+  assert.equal(received.headers['x-mediaex-auth-cookie'], undefined)
   assert.equal(received.headers.forwarded, undefined)
   assert.equal(received.headers['x-forwarded-host'], undefined)
   assert.equal((await proxyAuth(new Request('https://frontend.example/api/mediaex/account'))).status, 404)
   await assert.rejects(backendFetch('https://other.example/api/auth/get-session'), /Invalid MediaEX API destination/)
   assert.equal(requests.length, 1)
+
+  const origin = process.env.BACKEND_URL
+  const prefix = '/_service-relay/mediaex'
+  for (const suffix of [prefix, prefix + '/']) {
+    process.env.BACKEND_URL = origin + suffix
+    const bridged = await proxyAuth(new Request('https://frontend.example/api/auth/get-session?next=%2Fdashboard', {
+      headers: {
+        cookie: 'hoist_session=private; __Secure-better-auth.session_token=fixture',
+        'x-mediaex-auth-cookie': 'hoist_session=forged',
+        'x-forwarded-host': 'ignored.invalid',
+      },
+    }))
+    assert.equal(bridged.status, 302)
+    assert.equal(bridged.headers.getSetCookie().length, 2)
+    const hit = requests.at(-1)
+    assert.equal(hit.url, prefix + '/api/auth/get-session?next=%2Fdashboard')
+    assert.equal(hit.headers.host, new URL(origin).host)
+    assert.equal(hit.headers.cookie, undefined)
+    assert.equal(hit.headers['x-mediaex-auth-cookie'], '__Secure-better-auth.session_token=fixture')
+    assert.equal(hit.headers['x-mediaex-service-token'], process.env.MEDIAEX_API_TOKEN)
+    assert.equal(hit.headers['x-forwarded-host'], undefined)
+  }
+  await backendFetch('/api/mediaex/account', { headers: { cookie: 'hoist_session=private', 'x-mediaex-auth-cookie': 'forged' } })
+  assert.equal(requests.at(-1).headers.cookie, undefined)
+  assert.equal(requests.at(-1).headers['x-mediaex-auth-cookie'], undefined)
+  const beforeInvalid = requests.length
+  for (const target of [
+    '//other.invalid/api/auth', '/api/auth/../../other', '/api/%2e%2e/other', '/api/auth%2Fcallback',
+    '/api/auth%252fcallback', '/api/auth%5ccallback', '/api/auth%3fback', '/api/auth%23back',
+    '/api/auth/\\other', '/api/auth/#fragment',
+  ]) {
+    await assert.rejects(backendFetch(target), /Invalid MediaEX API destination/)
+  }
+  for (const location of [
+    origin + prefix + '?config=bad', origin + prefix + '#fragment', origin + '/a/../b', origin + '/a/%2E%2E/b',
+    origin + '/something%2fother', origin + '/a//b', origin.replace('://', '://user:secret@'),
+  ]) {
+    process.env.BACKEND_URL = location
+    await assert.rejects(backendFetch('/api/auth/get-session'), /Invalid MediaEX API destination/)
+  }
+  assert.equal(requests.length, beforeInvalid)
 })
