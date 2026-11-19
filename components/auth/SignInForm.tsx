@@ -28,7 +28,7 @@ export default function SignInForm() {
     await fakeRequest() // TODO: call the real sign-in endpoint
     setLoading(false)
     setDone(true)
-    setTimeout(() => router.push('/'), 900)
+    setTimeout(() => router.push('/dashboard'), 900)
   }
 
   return (
