@@ -14,6 +14,7 @@
     "db:migrate": "node --env-file-if-exists=.env.local --experimental-strip-types --no-warnings backend/migrate.mts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.10.0",
     "aws4fetch": "^1.0.20",
     "better-auth": "^1.7.26",
     "hls.js": "^1.7.4",
@@ -21,6 +22,7 @@
     "pg": "^8.23.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "sharp": "^0.34.5",
     "three": "^0.187.0"
   },
   "devDependencies": {

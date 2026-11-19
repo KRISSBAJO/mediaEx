@@ -1,18 +1,22 @@
 'use client'
 
 import Link from 'next/link'
-import { useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
 import { ACCEPT_ATTR, STAGES, guessType, isActive } from '@/lib/media/types'
 import { bytes } from '@/lib/sample'
 import Icon from '../Icon'
+import { flatTree, useLibrary } from '../library'
 import { useMedia, type Transfer } from '../media'
-import { Card, PageHead, StatusBadge, Thumb } from '../ui'
+import { Card, ModerationBadge, PageHead, StatusBadge, Thumb } from '../ui'
 
-function transferLine(t: Transfer, assetStatus?: string, stage?: number, progress?: number) {
+function transferLine(t: Transfer, assetStatus?: string, stage?: number, progress?: number, moderation?: string) {
   if (t.state === 'waiting') return 'Waiting to upload'
   if (t.state === 'uploading') return `Uploading · ${bytes(t.loaded)} of ${bytes(t.size)}`
   if (t.state === 'error') return t.error ?? 'Upload failed'
   if (t.state === 'cancelled') return 'Cancelled'
+  if (assetStatus === 'ready' && moderation === 'pending') return 'Ready · waiting for review before it goes public'
+  if (assetStatus === 'ready' && moderation === 'rejected') return 'Ready · rejected in review'
   if (assetStatus === 'ready') return 'Ready to stream'
   if (assetStatus === 'failed') return 'Processing failed'
   if (assetStatus === 'queued') return 'Uploaded · waiting for an encoder'
@@ -22,6 +26,14 @@ function transferLine(t: Transfer, assetStatus?: string, stage?: number, progres
 
 export default function Uploads() {
   const { assets, transfers, upload, cancel, clearFinished, get } = useMedia()
+  const lib = useLibrary()
+  const params = useSearchParams()
+  const [folderId, setFolderId] = useState<string | null>(params.get('folder'))
+  // a folder link from the library wins; drop it if that folder no longer exists
+  useEffect(() => {
+    if (lib.ready && folderId && !lib.folders.some((f) => f.id === folderId)) setFolderId(null)
+  }, [lib.ready, lib.folders, folderId])
+  const target = folderId ? lib.folderPath(folderId).map((f) => f.name).join(' / ') : null
   const [drag, setDrag] = useState(false)
   const input = useRef<HTMLInputElement>(null)
   const sessionIds = new Set(transfers.map((t) => t.assetId))
@@ -30,7 +42,21 @@ export default function Uploads() {
 
   return (
     <>
-      <PageHead title="Uploads" sub="Drop files to ingest them. MediaEX analyses, encodes and packages each one for streaming." />
+      <PageHead title="Uploads" sub="Drop files to ingest them. MediaEX analyses, encodes and packages each one for streaming.">
+        <label className="upload-target">
+          <span>Upload to</span>
+          <select className="select" value={folderId ?? ''} onChange={(e) => setFolderId(e.target.value || null)}>
+            <option value="">No folder</option>
+            {flatTree(lib.folders).map(({ folder, depth }) => (
+              <option key={folder.id} value={folder.id}>
+                {'\u00a0\u00a0'.repeat(depth)}
+                {depth ? '└ ' : ''}
+                {folder.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </PageHead>
 
       <div className="grid-2">
         <div className="stack">
@@ -44,7 +70,7 @@ export default function Uploads() {
             onDrop={(e) => {
               e.preventDefault()
               setDrag(false)
-              upload(e.dataTransfer.files)
+              upload(e.dataTransfer.files, folderId)
             }}
           >
             <span className="vf-corner tl" aria-hidden="true" />
@@ -58,14 +84,14 @@ export default function Uploads() {
               accept={ACCEPT_ATTR}
               className="sr-only"
               onChange={(e) => {
-                if (e.target.files) upload(e.target.files)
+                if (e.target.files) upload(e.target.files, folderId)
                 e.target.value = ''
               }}
             />
             <span className="drop-icon">
               <Icon name="upload" size={22} />
             </span>
-            <b>{drag ? 'Drop to upload' : 'Drag files here, or browse'}</b>
+            <b>{drag ? `Drop to upload${target ? ` into ${target}` : ''}` : 'Drag files here, or browse'}</b>
             <p>Video, audio and images up to 5 GB each — MP4, MOV, MKV, WebM, MXF, WAV, MP3, FLAC, JPEG, PNG and more.</p>
             <span className="btn btn-ghost btn-sm">Browse files</span>
           </label>
@@ -108,7 +134,7 @@ export default function Uploads() {
                           <b>{t.name}</b>
                         )}
                         <small className={t.state === 'error' ? 'is-bad' : ''}>
-                          {bytes(t.size)} · {transferLine(t, a?.status, a?.stage, a?.progress)}
+                          {bytes(t.size)} · {transferLine(t, a?.status, a?.stage, a?.progress, a?.moderation)}
                         </small>
                         {live && (
                           <span className={`meter ${sending ? 'is-upload' : ''}`}>
@@ -122,6 +148,8 @@ export default function Uploads() {
                         </button>
                       ) : t.state === 'error' ? (
                         <StatusBadge status="failed" />
+                      ) : a && a.status === 'ready' && a.moderation !== 'approved' ? (
+                        <ModerationBadge state={a.moderation} />
                       ) : a ? (
                         <StatusBadge status={a.status} progress={a.progress} />
                       ) : null}

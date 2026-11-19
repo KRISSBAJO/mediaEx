@@ -16,6 +16,7 @@ export type Transfer = {
   loaded: number
   state: 'waiting' | 'uploading' | 'done' | 'error' | 'cancelled'
   error?: string
+  folderId: string | null
 }
 
 type Media = {
@@ -26,10 +27,10 @@ type Media = {
   /** replace or add one asset locally (after a PATCH, say) */
   put: (a: MediaAsset) => void
   remove: (id: string) => Promise<boolean>
-  update: (id: string, patch: { title?: string; tags?: string[] }) => Promise<boolean>
+  update: (id: string, patch: { title?: string; tags?: string[]; folderId?: string | null; metadata?: Record<string, unknown> }) => Promise<boolean>
   retry: (id: string) => Promise<boolean>
   transfers: Transfer[]
-  upload: (files: FileList | File[]) => void
+  upload: (files: FileList | File[], folderId?: string | null) => void
   cancel: (key: string) => void
   clearFinished: () => void
 }
@@ -100,7 +101,7 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
   }, [])
 
   const update = useCallback(
-    async (id: string, patch: { title?: string; tags?: string[] }) => {
+    async (id: string, patch: { title?: string; tags?: string[]; folderId?: string | null; metadata?: Record<string, unknown> }) => {
       try {
         const { asset } = await json<{ asset: MediaAsset }>(await fetch(`/api/assets/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }))
         put(asset)
@@ -138,7 +139,7 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
       patchT(t.key, { state: 'uploading', loaded: 0 })
       try {
         const { asset, upload } = await json<{ asset: MediaAsset; upload: { url: string; method: string; headers: Record<string, string> } }>(
-          await fetch('/api/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: file.name, size: file.size, mimeType: file.type || null }) }),
+          await fetch('/api/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: file.name, size: file.size, mimeType: file.type || null, folderId: t.folderId }) }),
         )
         patchT(t.key, { assetId: asset.id })
         put(asset)
@@ -190,7 +191,7 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
     return () => window.removeEventListener('beforeunload', warn)
   }, [uploading])
 
-  const upload = useCallback((list: FileList | File[]) => {
+  const upload = useCallback((list: FileList | File[], folderId: string | null = null) => {
     const arr = Array.from(list)
     const ok = arr.filter((f) => guessType(f.name, f.type))
     const skipped = arr.length - ok.length
@@ -199,7 +200,7 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
     const added = ok.map((f, i) => {
       const key = `${Date.now()}-${i}-${f.name}`
       files.current.set(key, f)
-      return { key, assetId: null, name: f.name, size: f.size, loaded: 0, state: 'waiting' as const }
+      return { key, assetId: null, name: f.name, size: f.size, loaded: 0, state: 'waiting' as const, folderId }
     })
     setTransfers((ts) => [...added, ...ts])
   }, [])

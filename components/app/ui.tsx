@@ -41,6 +41,17 @@ export function StatusBadge({ status, progress }: { status: MediaStatus; progres
   )
 }
 
+/** Shown instead of the date on assets that aren't public yet. */
+export function ModerationBadge({ state }: { state: MediaAsset['moderation'] }) {
+  if (state === 'approved') return null
+  return (
+    <span className={`status ${state === 'pending' ? 'status-review' : 'status-failed'}`}>
+      <Icon name={state === 'pending' ? 'clock' : 'x'} size={13} />
+      {state === 'pending' ? 'In review' : 'Rejected'}
+    </span>
+  )
+}
+
 export function TypeIcon({ type }: { type: MediaType }) {
   return <Icon name={type} size={15} className="type-icon" />
 }

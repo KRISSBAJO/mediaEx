@@ -81,12 +81,12 @@ export async function proxyAuth(request: Request) {
 }
 
 /**
- * Forwards the media API (/api/assets, /api/uploads, /api/media) to the backend, streaming both ways so large uploads
+ * Forwards the media API (/api/assets, uploads, media, folders, collections, tags, searches) to the backend, streaming both ways so large uploads
  * and video segments never sit in memory. Redirects (presigned bucket URLs) pass through to the browser.
  */
 export async function proxyMedia(request: Request) {
   const incoming = new URL(request.url)
-  if (!/^\/api\/(assets|uploads|media)(\/|$)/.test(incoming.pathname)) return new Response(null, { status: 404 })
+  if (!/^\/api\/(assets|uploads|media|folders|collections|tags|searches|fields|moderation)(\/|$)/.test(incoming.pathname)) return new Response(null, { status: 404 })
 
   const headers = new Headers()
   for (const name of ['accept', 'content-type', 'content-length', 'range', 'if-none-match', 'if-modified-since', 'origin', 'referer', 'user-agent']) {
