@@ -447,7 +447,7 @@ function Billing() {
         title="Plan"
         hint="Paid plans unlock once billing is connected."
         footer={
-          <Link href="/#pricing" className="btn btn-ghost btn-sm">
+          <Link href="/pricing" className="btn btn-ghost btn-sm">
             Compare plans
           </Link>
         }

@@ -115,7 +115,7 @@ export default function Footer() {
               <b>0{i + 1}</b> {c.h}
             </h4>
             {c.l.map(([x, tag]) => (
-              <a key={x} href="#top">
+              <a key={x} href={x === 'Pricing' ? '/pricing' : '#top'}>
                 {x}
                 {tag && <em>{tag}</em>}
               </a>
