@@ -5,9 +5,10 @@ import { useState } from 'react'
 import { bytes, duration as fmtDuration } from '@/lib/sample'
 import Icon from '../Icon'
 import MediaPlayer from '../MediaPlayer'
+import MetadataEditor from '../MetadataEditor'
 import { flatTree, useLibrary } from '../library'
 import { Ago, dims, useMedia } from '../media'
-import { StatusBadge, copyText } from '../ui'
+import { ModerationBadge, StatusBadge, copyText } from '../ui'
 import { CollectDialog, TagInput } from './dialogs'
 
 export default function Preview({ id, onClose }: { id: string; onClose: () => void }) {
@@ -50,7 +51,7 @@ export default function Preview({ id, onClose }: { id: string; onClose: () => vo
           <div>
             <dt>Status</dt>
             <dd>
-              <StatusBadge status={a.status} progress={a.progress} />
+              {a.status === 'ready' && a.moderation !== 'approved' ? <ModerationBadge state={a.moderation} /> : <StatusBadge status={a.status} progress={a.progress} />}
             </dd>
           </div>
           <div>
@@ -97,6 +98,8 @@ export default function Preview({ id, onClose }: { id: string; onClose: () => vo
           <span>Tags</span>
           <TagInput value={a.tags} onChange={(tags) => void media.update(a.id, { tags })} />
         </div>
+
+        <MetadataEditor asset={a} />
 
         <div className="field-d">
           <span>Collections</span>

@@ -23,6 +23,7 @@ const NAV = [
       { href: '/dashboard', label: 'Overview', icon: 'overview' },
       { href: '/dashboard/library', label: 'Library', icon: 'library' },
       { href: '/dashboard/uploads', label: 'Uploads', icon: 'upload' },
+      { href: '/dashboard/review', label: 'Review', icon: 'check' },
       { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics' },
     ],
   },
@@ -86,6 +87,7 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
   const counts: Record<string, number> = {
     '/dashboard/library': assets.filter((a) => a.status !== 'uploading').length,
     '/dashboard/uploads': assets.filter(inPipeline).length,
+    '/dashboard/review': assets.filter((a) => a.moderation === 'pending').length,
   }
   const used = assets.reduce((t, a) => t + a.size + a.outputSize, 0)
 

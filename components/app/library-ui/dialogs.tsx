@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { normaliseTag } from '@/lib/media/types'
+import { FIELD_TYPE_LABEL, normaliseTag } from '@/lib/media/types'
 import Icon from '../Icon'
 import { flatTree, useLibrary } from '../library'
 
@@ -340,5 +340,83 @@ export function ConfirmDialog({ title, sub, action, danger, onClose, onConfirm }
         </>
       }
     />
+  )
+}
+
+/** Set one custom field on many assets at once. Leaving it empty clears the field. */
+export function MetaDialog({ count, onClose, onApply }: { count: number; onClose: () => void; onApply: (field: string, value: unknown) => Promise<boolean> }) {
+  const { fields } = useLibrary()
+  const [id, setId] = useState(fields[0]?.id ?? '')
+  const [value, setValue] = useState('')
+  const [multi, setMulti] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const field = fields.find((f) => f.id === id)
+  const parsed = !field ? null : field.type === 'multiselect' ? multi : field.type === 'number' ? (value.trim() ? Number(value) : null) : value.trim() || null
+  return (
+    <Dialog
+      title={`Set a field on ${count === 1 ? '1 asset' : `${count} assets`}`}
+      sub="Replaces the current value on every selected asset. Leave it empty to clear the field."
+      onClose={onClose}
+      onSubmit={async () => {
+        if (!field || busy) return
+        setBusy(true)
+        if (await onApply(field.id, parsed)) onClose()
+        setBusy(false)
+      }}
+      foot={
+        <>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={!field || busy}>
+            {busy ? 'Saving…' : 'Apply'}
+          </button>
+        </>
+      }
+    >
+      <label className="field-d">
+        <span>Field</span>
+        <select
+          className="select"
+          value={id}
+          onChange={(e) => {
+            setId(e.target.value)
+            setValue('')
+            setMulti([])
+          }}
+        >
+          {fields.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.label} · {FIELD_TYPE_LABEL[f.type]}
+            </option>
+          ))}
+        </select>
+      </label>
+      {field && (
+        <label className="field-d">
+          <span>Value</span>
+          {field.type === 'select' ? (
+            <select className="select" value={value} onChange={(e) => setValue(e.target.value)}>
+              <option value="">— clear —</option>
+              {field.options.map((o) => (
+                <option key={o}>{o}</option>
+              ))}
+            </select>
+          ) : field.type === 'multiselect' ? (
+            <div className="meta-multi">
+              {field.options.map((o) => (
+                <button key={o} type="button" aria-pressed={multi.includes(o)} className={multi.includes(o) ? 'is-on' : ''} onClick={() => setMulti((m) => (m.includes(o) ? m.filter((x) => x !== o) : [...m, o]))}>
+                  {o}
+                </button>
+              ))}
+            </div>
+          ) : field.type === 'longtext' ? (
+            <textarea className="textarea" rows={3} value={value} onChange={(e) => setValue(e.target.value)} />
+          ) : (
+            <input className="input" type={field.type === 'date' ? 'date' : field.type === 'number' ? 'number' : 'text'} value={value} onChange={(e) => setValue(e.target.value)} />
+          )}
+        </label>
+      )}
+    </Dialog>
   )
 }

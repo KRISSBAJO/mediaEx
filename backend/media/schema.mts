@@ -77,4 +77,47 @@ create table if not exists "saved_search" (
   "createdAt"      timestamptz not null default now()
 );
 create index if not exists "saved_search_owner_idx" on "saved_search" ("organizationId", "userId");
+
+-- custom metadata: fields per workspace, values per asset ({ fieldId: value })
+create table if not exists "metadata_field" (
+  "id"             text primary key,
+  "organizationId" text not null references "organization"("id") on delete cascade,
+  "key"            text not null,
+  "label"          text not null,
+  "type"           text not null,
+  "options"        jsonb not null default '[]'::jsonb,
+  "required"       boolean not null default false,
+  "help"           text,
+  "position"       integer not null default 0,
+  "createdAt"      timestamptz not null default now()
+);
+create unique index if not exists "metadata_field_key_idx" on "metadata_field" ("organizationId", "key");
+alter table "asset" add column if not exists "metadata" jsonb not null default '{}'::jsonb;
+create index if not exists "asset_metadata_idx" on "asset" using gin ("metadata");
+
+-- moderation: per-workspace settings and a review state on every asset (existing assets stay approved)
+create table if not exists "workspace_setting" (
+  "organizationId" text primary key references "organization"("id") on delete cascade,
+  "moderationMode" text not null default 'off',
+  "blocklist"      text[] not null default '{}',
+  "aiReview"       boolean not null default false,
+  "updatedAt"      timestamptz not null default now()
+);
+alter table "asset" add column if not exists "moderation" text not null default 'approved';
+alter table "asset" add column if not exists "moderationFlags" jsonb not null default '[]'::jsonb;
+alter table "asset" add column if not exists "moderationNote" text;
+alter table "asset" add column if not exists "moderatedBy" text references "user"("id") on delete set null;
+alter table "asset" add column if not exists "moderatedAt" timestamptz;
+create index if not exists "asset_moderation_idx" on "asset" ("organizationId", "moderation") where "moderation" <> 'approved';
+
+-- cached on-the-fly transformations (the files live under <asset>/derived/)
+create table if not exists "asset_variant" (
+  "assetId"   text not null references "asset"("id") on delete cascade,
+  "key"       text not null,
+  "params"    text not null,
+  "format"    text not null,
+  "bytes"     integer not null,
+  "createdAt" timestamptz not null default now(),
+  primary key ("assetId", "key")
+);
 `

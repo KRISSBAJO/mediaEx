@@ -8,8 +8,10 @@ import { USAGE } from '@/lib/sample'
 import { canManage, useAccount, type Role } from '../account'
 import Icon from '../Icon'
 import { Avatar, Card, Meter, PageHead, toast } from '../ui'
+import SettingsMetadata from './SettingsMetadata'
+import SettingsModeration from './SettingsModeration'
 
-type Tab = 'general' | 'team' | 'account' | 'billing'
+type Tab = 'general' | 'team' | 'metadata' | 'moderation' | 'account' | 'billing'
 const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' }
 const ROLE_HELP: Record<Role, string> = {
   owner: 'Everything, including deleting the workspace',
@@ -480,6 +482,8 @@ function Billing() {
 const SECTIONS: { value: Tab; label: string; icon: string }[] = [
   { value: 'general', label: 'Workspace', icon: 'layers' },
   { value: 'team', label: 'Team', icon: 'users' },
+  { value: 'metadata', label: 'Metadata', icon: 'list' },
+  { value: 'moderation', label: 'Moderation', icon: 'check' },
   { value: 'account', label: 'Account', icon: 'settings' },
   { value: 'billing', label: 'Billing', icon: 'card' },
 ]
@@ -489,7 +493,7 @@ export default function Settings() {
   const router = useRouter()
   const { workspace } = useAccount()
   const raw = params.get('tab')
-  const tab: Tab = raw === 'team' || raw === 'billing' || raw === 'account' ? raw : 'general'
+  const tab: Tab = raw === 'team' || raw === 'billing' || raw === 'account' || raw === 'metadata' || raw === 'moderation' ? raw : 'general'
 
   return (
     <>
@@ -512,6 +516,8 @@ export default function Settings() {
           {tab === 'general' && <General />}
           {tab === 'team' && <Team />}
           {tab === 'account' && <Account />}
+          {tab === 'metadata' && <SettingsMetadata />}
+          {tab === 'moderation' && <SettingsModeration />}
           {tab === 'billing' && <Billing />}
         </div>
       </div>

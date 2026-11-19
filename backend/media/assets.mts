@@ -1,7 +1,7 @@
 /** Server-side access to media assets. Every query is scoped to a workspace. */
 import { randomBytes } from 'node:crypto'
 import { auth, pool } from '../auth.mts'
-import type { MediaAsset, MediaStatus, MediaType, Rendition, SearchQuery } from './types.mts'
+import type { MediaAsset, MediaStatus, MediaType, ModerationFlag, ModerationState, Rendition, SearchQuery } from './types.mts'
 
 export type AssetRow = {
   id: string
@@ -34,6 +34,12 @@ export type AssetRow = {
   readyAt: Date | null
   folderId: string | null
   collectionIds?: string[]
+  metadata: Record<string, unknown>
+  moderation: ModerationState
+  moderationFlags: ModerationFlag[]
+  moderationNote: string | null
+  moderatedBy: string | null
+  moderatedAt: Date | null
 }
 
 export const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 5 * 1024 ** 3) // 5 GiB: one S3 PUT
@@ -71,6 +77,10 @@ export function toDTO(a: AssetRow): MediaAsset {
     playbackUrl: a.status === 'ready' ? fileUrl(a, a.playlistKey) : null,
     folderId: a.folderId ?? null,
     collectionIds: a.collectionIds ?? [],
+    metadata: a.metadata ?? {},
+    moderation: a.moderation ?? 'approved',
+    moderationFlags: a.moderationFlags ?? [],
+    moderationNote: a.moderationNote ?? null,
   }
 }
 
@@ -109,7 +119,10 @@ export async function searchAssets(orgId: string, query: SearchQuery, limit = 50
   const words = (query.q ?? '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8)
   for (const w of words) {
     const p = arg(contains(w))
-    where.push(`(a.title ilike ${p} or a."fileName" ilike ${p} or coalesce(a."sourceInfo", '') ilike ${p} or exists (select 1 from unnest(a.tags) t where t ilike ${p}))`)
+    where.push(
+      `(a.title ilike ${p} or a."fileName" ilike ${p} or coalesce(a."sourceInfo", '') ilike ${p} or exists (select 1 from unnest(a.tags) t where t ilike ${p})` +
+        ` or exists (select 1 from jsonb_each_text(a.metadata) m where m.value ilike ${p}))`,
+    )
   }
   if (query.folder === 'root') where.push('a."folderId" is null')
   else if (query.folder) where.push(`a."folderId" = ${arg(query.folder)}`)
@@ -120,6 +133,8 @@ export async function searchAssets(orgId: string, query: SearchQuery, limit = 50
     const parts = query.status.map((s) => (s === 'ready' ? `a.status = 'ready'` : s === 'failed' ? `a.status = 'failed'` : `a.status in ('uploading', 'queued', 'processing')`))
     where.push(`(${parts.join(' or ')})`)
   }
+  // dropdown fields: the value equals the option (single) or contains it (multi-select)
+  for (const [field, option] of Object.entries(query.meta ?? {})) where.push(`a.metadata->${arg(field)} @> to_jsonb(${arg(option)}::text)`)
   if (query.date) where.push(`a."createdAt" > now() - ${arg(INTERVALS[query.date])}::interval`)
 
   // relevance: titles starting with the search, then titles containing it, then the rest; newest first within each

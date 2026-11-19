@@ -52,7 +52,7 @@ function Checks<T extends string>({ options, value, onChange, labels }: { option
 }
 
 export default function Filters({ query, go, onSave }: { query: SearchQuery; go: (q: SearchQuery) => void; onSave: () => void }) {
-  const { tags } = useLibrary()
+  const { tags, fields } = useLibrary()
   const [text, setText] = useState(query.q ?? '')
   const [tagFind, setTagFind] = useState('')
   const typing = useRef(false)
@@ -74,7 +74,14 @@ export default function Filters({ query, go, onSave }: { query: SearchQuery; go:
   }, [text])
 
   const set = (patch: Partial<SearchQuery>) => go({ ...query, ...patch })
-  const filtered = Boolean(query.q || query.type?.length || query.status?.length || query.tags?.length || query.date)
+  const filtered = Boolean(query.q || query.type?.length || query.status?.length || query.tags?.length || query.date || Object.keys(query.meta ?? {}).length)
+  const dropdowns = fields.filter((f) => f.type === 'select' || f.type === 'multiselect')
+  const setMeta = (id: string, v: string | null) => {
+    const meta = { ...(query.meta ?? {}) }
+    if (v) meta[id] = v
+    else delete meta[id]
+    set({ meta: Object.keys(meta).length ? meta : undefined })
+  }
   const shownTags = tags.filter((t) => !tagFind || t.tag.includes(tagFind.toLowerCase().trim()))
   const sort = query.sort ?? (query.q ? 'relevance' : 'new')
 
@@ -156,6 +163,29 @@ export default function Filters({ query, go, onSave }: { query: SearchQuery; go:
             </>
           )}
         </Chip>
+
+        {dropdowns.map((f) => (
+          <Chip key={f.id} label={query.meta?.[f.id] ? `${f.label}: ${query.meta[f.id]}` : f.label} count={query.meta?.[f.id] ? 1 : 0}>
+            {(close) => (
+              <div className="fpanel-scroll">
+                {['', ...f.options].map((o) => (
+                  <label key={o || 'any'} className="fopt">
+                    <input
+                      type="radio"
+                      name={`m-${f.id}`}
+                      checked={(query.meta?.[f.id] ?? '') === o}
+                      onChange={() => {
+                        setMeta(f.id, o || null)
+                        close()
+                      }}
+                    />
+                    {o || 'Any'}
+                  </label>
+                ))}
+              </div>
+            )}
+          </Chip>
+        ))}
 
         {filtered && (
           <>

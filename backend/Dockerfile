@@ -8,8 +8,8 @@ COPY . .
 RUN npm run build && npm prune --omit=dev --offline --no-audit --no-fund
 
 FROM base AS runtime
-# the media pipeline runs ffmpeg and ffprobe
-RUN apk add --no-cache ffmpeg
+# the media pipeline runs ffmpeg and ffprobe; text watermarks need a font
+RUN apk add --no-cache ffmpeg font-dejavu
 ENV NODE_ENV=production
 COPY --from=build /app ./
 CMD ["npm", "start"]

@@ -8,13 +8,15 @@ import { bytes } from '@/lib/sample'
 import Icon from '../Icon'
 import { flatTree, useLibrary } from '../library'
 import { useMedia, type Transfer } from '../media'
-import { Card, PageHead, StatusBadge, Thumb } from '../ui'
+import { Card, ModerationBadge, PageHead, StatusBadge, Thumb } from '../ui'
 
-function transferLine(t: Transfer, assetStatus?: string, stage?: number, progress?: number) {
+function transferLine(t: Transfer, assetStatus?: string, stage?: number, progress?: number, moderation?: string) {
   if (t.state === 'waiting') return 'Waiting to upload'
   if (t.state === 'uploading') return `Uploading · ${bytes(t.loaded)} of ${bytes(t.size)}`
   if (t.state === 'error') return t.error ?? 'Upload failed'
   if (t.state === 'cancelled') return 'Cancelled'
+  if (assetStatus === 'ready' && moderation === 'pending') return 'Ready · waiting for review before it goes public'
+  if (assetStatus === 'ready' && moderation === 'rejected') return 'Ready · rejected in review'
   if (assetStatus === 'ready') return 'Ready to stream'
   if (assetStatus === 'failed') return 'Processing failed'
   if (assetStatus === 'queued') return 'Uploaded · waiting for an encoder'
@@ -132,7 +134,7 @@ export default function Uploads() {
                           <b>{t.name}</b>
                         )}
                         <small className={t.state === 'error' ? 'is-bad' : ''}>
-                          {bytes(t.size)} · {transferLine(t, a?.status, a?.stage, a?.progress)}
+                          {bytes(t.size)} · {transferLine(t, a?.status, a?.stage, a?.progress, a?.moderation)}
                         </small>
                         {live && (
                           <span className={`meter ${sending ? 'is-upload' : ''}`}>
@@ -146,6 +148,8 @@ export default function Uploads() {
                         </button>
                       ) : t.state === 'error' ? (
                         <StatusBadge status="failed" />
+                      ) : a && a.status === 'ready' && a.moderation !== 'approved' ? (
+                        <ModerationBadge state={a.moderation} />
                       ) : a ? (
                         <StatusBadge status={a.status} progress={a.progress} />
                       ) : null}

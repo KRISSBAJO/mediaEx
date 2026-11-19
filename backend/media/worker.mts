@@ -15,6 +15,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { pool } from '../auth.mts'
 import { prefixOf, type AssetRow } from './assets.mts'
+import { reviewAsset } from './moderation.mts'
 import { storage } from './storage.mts'
 import type { MediaType, Rendition } from './types.mts'
 
@@ -298,6 +299,8 @@ async function processAsset(job: AssetRow) {
       status: 'ready', stage: 3, progress: 100, error: null, readyAt: new Date(),
       thumbKey, posterKey, playlistKey, renditions: JSON.stringify(renditions), outputSize,
     })
+    // moderation: blocklist and optional automatic review decide whether it goes public
+    await reviewAsset(job.id).catch((e) => console.error(`[media] ${job.id} moderation check failed:`, e instanceof Error ? e.message : e))
     console.log(`[media] ${job.id} ready in ${((Date.now() - t0) / 1000).toFixed(1)}s (${info.type}, ${renditions.length} outputs)`)
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)

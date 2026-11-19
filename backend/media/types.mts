@@ -40,7 +40,30 @@ export type MediaAsset = {
   playbackUrl: string | null // HLS playlist for video/audio
   folderId: string | null
   collectionIds: string[]
+  metadata: Record<string, unknown> // { fieldId: value }
+  moderation: ModerationState
+  moderationFlags: ModerationFlag[]
+  moderationNote: string | null
 }
+
+/* ------------------------------------------------ moderation */
+export type ModerationState = 'approved' | 'pending' | 'rejected'
+export type ModerationMode = 'off' | 'all' | 'flagged'
+export type ModerationFlag = { source: 'blocklist' | 'ai' | 'system'; reason: string; categories?: string[] }
+export type ModerationSettings = { mode: ModerationMode; blocklist: string[]; aiReview: boolean; aiAvailable: boolean }
+
+/* ------------------------------------------------ custom metadata */
+export const FIELD_TYPES = ['text', 'longtext', 'number', 'date', 'select', 'multiselect'] as const
+export type FieldType = (typeof FIELD_TYPES)[number]
+export const FIELD_TYPE_LABEL: Record<FieldType, string> = {
+  text: 'Text',
+  longtext: 'Long text',
+  number: 'Number',
+  date: 'Date',
+  select: 'Dropdown',
+  multiselect: 'Multi-select',
+}
+export type MetadataField = { id: string; key: string; label: string; type: FieldType; options: string[]; required: boolean; help: string | null }
 
 /* ------------------------------------------------ organisation */
 export type Folder = { id: string; name: string; parentId: string | null; assetCount: number; createdAt: string }
@@ -61,6 +84,7 @@ export type SearchQuery = {
   tags?: string[] // every tag must match
   date?: DateFilter
   sort?: Sort
+  meta?: Record<string, string> // { fieldId: option } from dropdown fields; URL form m.<fieldId>=<option>
 }
 export type SavedSearch = { id: string; name: string; query: SearchQuery; createdAt: string }
 
@@ -90,6 +114,9 @@ export function parseQuery(p: URLSearchParams): SearchQuery {
   if (date && DATES.includes(date as DateFilter)) q.date = date as DateFilter
   const sort = p.get('sort')
   if (sort && SORTS.includes(sort as Sort)) q.sort = sort as Sort
+  const meta: Record<string, string> = {}
+  for (const [k, v] of p) if (/^m\.mdf_[a-z0-9]{4,24}$/.test(k) && v.trim()) meta[k.slice(2)] = v.trim().slice(0, 60)
+  if (Object.keys(meta).length) q.meta = meta
   return q
 }
 
@@ -104,11 +131,12 @@ export function queryParams(q: SearchQuery): URLSearchParams {
   if (q.tags?.length) p.set('tags', q.tags.join(','))
   if (q.date) p.set('date', q.date)
   if (q.sort) p.set('sort', q.sort)
+  for (const [k, v] of Object.entries(q.meta ?? {})) p.set(`m.${k}`, v)
   return p
 }
 
 /** Is anything narrowing the results (beyond where you are and how it's sorted)? */
-export const isFiltered = (q: SearchQuery) => Boolean(q.q || q.type?.length || q.status?.length || q.tags?.length || q.date)
+export const isFiltered = (q: SearchQuery) => Boolean(q.q || q.type?.length || q.status?.length || q.tags?.length || q.date || Object.keys(q.meta ?? {}).length)
 
 export const normaliseTag = (t: string) => t.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 32)
 

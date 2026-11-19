@@ -10,11 +10,11 @@ import { request, useLibrary } from '../library'
 import Filters from '../library-ui/Filters'
 import Preview from '../library-ui/Preview'
 import LibrarySidebar, { DRAG_TYPE } from '../library-ui/Sidebar'
-import { CollectDialog, ConfirmDialog, MoveDialog, NameDialog, TagDialog } from '../library-ui/dialogs'
+import { CollectDialog, ConfirmDialog, MetaDialog, MoveDialog, NameDialog, TagDialog } from '../library-ui/dialogs'
 import { Ago, dims, useMedia } from '../media'
-import { Card, StatusBadge, Thumb, TypeIcon, toast } from '../ui'
+import { Card, ModerationBadge, StatusBadge, Thumb, TypeIcon, toast } from '../ui'
 
-type Dialog = 'move' | 'collect' | 'tag' | 'untag' | 'delete' | 'save' | 'new-folder' | null
+type Dialog = 'move' | 'collect' | 'tag' | 'untag' | 'meta' | 'delete' | 'save' | 'new-folder' | null
 
 function useView() {
   const [view, setView] = useState<'grid' | 'list'>('grid')
@@ -162,7 +162,7 @@ export default function Library() {
   const collection = query.collection ? lib.collections.find((c) => c.id === query.collection) : undefined
   const path = folder ? lib.folderPath(folder.id) : []
   const title = collection?.name ?? folder?.name ?? (query.folder === 'root' ? 'Not in a folder' : 'Library')
-  const filtered = Boolean(query.q || query.type?.length || query.status?.length || query.tags?.length || query.date)
+  const filtered = Boolean(query.q || query.type?.length || query.status?.length || query.tags?.length || query.date || Object.keys(query.meta ?? {}).length)
   const stored = list.reduce((t, a) => t + a.size + a.outputSize, 0)
   const sub = found === null ? 'Loading…' : `${n(list.length)}${filtered ? ' match' + (list.length === 1 ? 'es' : '') : ''} · ${bytes(stored)}${collection?.description ? ` · ${collection.description}` : ''}`
 
@@ -252,6 +252,11 @@ export default function Library() {
                 <button type="button" className="btn btn-quiet btn-sm" onClick={() => setDialog('untag')}>
                   Untag
                 </button>
+                {lib.fields.length > 0 && (
+                  <button type="button" className="btn btn-quiet btn-sm" onClick={() => setDialog('meta')}>
+                    Set field
+                  </button>
+                )}
                 {collection && (
                   <button
                     type="button"
@@ -343,7 +348,9 @@ export default function Library() {
                           <TypeIcon type={a.type} />
                           {a.type === 'image' ? dims(a) : fmtDuration(Math.round(a.duration))}
                         </span>
-                        {a.status === 'ready' ? (
+                        {a.status === 'ready' && a.moderation !== 'approved' ? (
+                          <ModerationBadge state={a.moderation} />
+                        ) : a.status === 'ready' ? (
                           <span className="muted">
                             <Ago iso={a.createdAt} />
                           </span>
@@ -400,7 +407,7 @@ export default function Library() {
                           </button>
                         </td>
                         <td>
-                          <StatusBadge status={a.status} progress={isActive(a) ? a.progress : undefined} />
+                          {a.status === 'ready' && a.moderation !== 'approved' ? <ModerationBadge state={a.moderation} /> : <StatusBadge status={a.status} progress={isActive(a) ? a.progress : undefined} />}
                         </td>
                         <td className="tag-cell">{a.tags.length ? a.tags.slice(0, 3).join(', ') + (a.tags.length > 3 ? ` +${a.tags.length - 3}` : '') : <span className="muted">—</span>}</td>
                         <td className="num">{a.duration ? fmtDuration(Math.round(a.duration)) : '—'}</td>
@@ -441,6 +448,13 @@ export default function Library() {
           mode={dialog}
           onClose={() => setDialog(null)}
           onApply={async (tags) => (await lib.bulk(ids, { action: dialog, tags })) && done(`${dialog === 'tag' ? 'Tagged' : 'Untagged'} ${n(ids.length)}`)}
+        />
+      )}
+      {dialog === 'meta' && (
+        <MetaDialog
+          count={ids.length}
+          onClose={() => setDialog(null)}
+          onApply={async (field, value) => (await lib.bulk(ids, { action: 'meta', field, value })) && done(`Updated ${n(ids.length)}`)}
         />
       )}
       {dialog === 'delete' && (

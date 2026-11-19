@@ -15,11 +15,12 @@
  *   GET    /api/searches                     your saved searches in this workspace
  *   POST   /api/searches                     { name, query }
  *   DELETE /api/searches/:id
- *   POST   /api/assets/bulk                  { ids, action: move | tag | untag | delete, folderId?, tags? }
+ *   POST   /api/assets/bulk                  { ids, action: move | tag | untag | meta | delete, folderId?, tags?, field?, value? }
  */
 import { randomBytes } from 'node:crypto'
 import { pool } from '../auth.mts'
 import { HttpError, prefixOf, requireMember } from './assets.mts'
+import { listFields, validateValue } from './fields.mts'
 import { storage } from './storage.mts'
 import { normaliseTag, parseQuery, queryParams, type Collection, type Folder, type SavedSearch, type SearchQuery } from './types.mts'
 
@@ -279,7 +280,7 @@ async function searches(req: Request, id?: string) {
 export async function bulk(req: Request) {
   const { orgId } = await requireMember(req.headers)
   if (req.method !== 'POST') throw new HttpError(405, 'Method not allowed')
-  const b = await body<{ ids: unknown; action: unknown; folderId: unknown; tags: unknown }>(req)
+  const b = await body<{ ids: unknown; action: unknown; folderId: unknown; tags: unknown; field: unknown; value: unknown }>(req)
   const ids = await ownIds(orgId, cleanIds(b.ids))
   if (!ids.length) throw new HttpError(404, 'None of those assets are in this workspace.')
 
@@ -300,6 +301,14 @@ export async function bulk(req: Request) {
     } else {
       await pool.query(`update "asset" set tags = (select array(select t from unnest(tags) t where t <> all($2::text[]))), "updatedAt" = now() where id = any($1::text[])`, [ids, tags])
     }
+    return Response.json({ changed: ids.length })
+  }
+  if (b.action === 'meta') {
+    const field = (await listFields(orgId)).find((f) => f.id === b.field)
+    if (!field) throw new HttpError(400, 'Unknown metadata field.')
+    const value = validateValue(field, b.value)
+    if (value === undefined) await pool.query(`update "asset" set metadata = metadata - $2, "updatedAt" = now() where id = any($1::text[])`, [ids, field.id])
+    else await pool.query(`update "asset" set metadata = jsonb_set(metadata, array[$2], $3::jsonb), "updatedAt" = now() where id = any($1::text[])`, [ids, field.id, JSON.stringify(value)])
     return Response.json({ changed: ids.length })
   }
   if (b.action === 'delete') {

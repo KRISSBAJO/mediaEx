@@ -5,7 +5,7 @@
  * them. Shared by the Library, Uploads, the asset page and the command menu.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import type { Collection, Folder, SavedSearch, SearchQuery, TagCount } from '@/lib/media/types'
+import type { Collection, FieldType, Folder, MetadataField, SavedSearch, SearchQuery, TagCount } from '@/lib/media/types'
 import { useMedia } from './media'
 import { toast } from './ui'
 
@@ -23,13 +23,15 @@ export async function request<T>(path: string, init?: RequestInit & { json?: unk
   return body as T
 }
 
-type BulkAction = { action: 'move'; folderId: string | null } | { action: 'tag' | 'untag'; tags: string[] } | { action: 'delete' }
+type BulkAction = { action: 'move'; folderId: string | null } | { action: 'tag' | 'untag'; tags: string[] } | { action: 'meta'; field: string; value: unknown } | { action: 'delete' }
+export type FieldInput = { label: string; type?: FieldType; options?: string[]; required?: boolean; help?: string | null }
 
 type Library = {
   folders: Folder[]
   collections: Collection[]
   tags: TagCount[]
   searches: SavedSearch[]
+  fields: MetadataField[]
   ready: boolean
   reload: () => Promise<void>
   folderPath: (id: string | null | undefined) => Folder[]
@@ -44,6 +46,9 @@ type Library = {
   bulk: (ids: string[], what: BulkAction) => Promise<boolean>
   saveSearch: (name: string, query: SearchQuery) => Promise<boolean>
   deleteSearch: (id: string) => Promise<boolean>
+  saveField: (id: string | null, input: FieldInput) => Promise<boolean>
+  deleteField: (id: string) => Promise<boolean>
+  reorderFields: (ids: string[]) => Promise<boolean>
 }
 
 const Ctx = createContext<Library | null>(null)
@@ -65,16 +70,19 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
   const [collections, setCollections] = useState<Collection[]>([])
   const [tags, setTags] = useState<TagCount[]>([])
   const [searches, setSearches] = useState<SavedSearch[]>([])
+  const [fields, setFields] = useState<MetadataField[]>([])
   const [ready, setReady] = useState(false)
 
   const reload = useCallback(async () => {
     try {
-      const [f, c, t, s] = await Promise.all([
+      const [f, c, t, s, m] = await Promise.all([
         request<{ folders: Folder[] }>('/api/folders'),
         request<{ collections: Collection[] }>('/api/collections'),
         request<{ tags: TagCount[] }>('/api/tags'),
         request<{ searches: SavedSearch[] }>('/api/searches'),
+        request<{ fields: MetadataField[] }>('/api/fields'),
       ])
+      setFields(m.fields)
       setFolders(f.folders)
       setCollections(c.collections)
       setTags(t.tags)
@@ -121,6 +129,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       collections,
       tags,
       searches,
+      fields,
       ready,
       reload,
       folderPath,
@@ -216,6 +225,34 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
           return fail(e, 'Couldn’t save the search.')
         }
       },
+      saveField: async (id, input) => {
+        try {
+          const { fields } = await request<{ fields: MetadataField[] }>(id ? `/api/fields/${id}` : '/api/fields', { method: id ? 'PATCH' : 'POST', json: input })
+          setFields(fields)
+          return true
+        } catch (e) {
+          return fail(e, 'Couldn’t save the field.')
+        }
+      },
+      deleteField: async (id) => {
+        try {
+          const { fields } = await request<{ fields: MetadataField[] }>(`/api/fields/${id}`, { method: 'DELETE' })
+          setFields(fields)
+          await media.refresh()
+          return true
+        } catch (e) {
+          return fail(e, 'Couldn’t delete the field.')
+        }
+      },
+      reorderFields: async (ids) => {
+        try {
+          const { fields } = await request<{ fields: MetadataField[] }>('/api/fields/reorder', { method: 'POST', json: { ids } })
+          setFields(fields)
+          return true
+        } catch (e) {
+          return fail(e, 'Couldn’t reorder the fields.')
+        }
+      },
       deleteSearch: async (id) => {
         try {
           const { searches } = await request<{ searches: SavedSearch[] }>(`/api/searches/${id}`, { method: 'DELETE' })
@@ -226,7 +263,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
         }
       },
     }),
-    [folders, collections, tags, searches, ready, reload, folderPath, after],
+    [folders, collections, tags, searches, fields, ready, reload, folderPath, after, media],
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

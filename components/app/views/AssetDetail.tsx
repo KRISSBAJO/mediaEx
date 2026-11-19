@@ -7,16 +7,22 @@ import { STAGES, isActive } from '@/lib/media/types'
 import { bytes, duration as fmtDuration } from '@/lib/sample'
 import Icon from '../Icon'
 import MediaPlayer from '../MediaPlayer'
+import MetadataEditor from '../MetadataEditor'
+import TransformBuilder from '../TransformBuilder'
 import { flatTree, useLibrary } from '../library'
 import { CollectDialog, TagInput } from '../library-ui/dialogs'
 import { Ago, dims, useMedia } from '../media'
-import { Card, StatusBadge, Tabs, TypeIcon, copyText } from '../ui'
+import { Card, ModerationBadge, StatusBadge, Tabs, TypeIcon, copyText, toast } from '../ui'
+import { canManage, useAccount } from '../account'
+import { request } from '../library'
 
-type Tab = 'renditions' | 'embed'
+type Tab = 'renditions' | 'embed' | 'transform'
 
 export default function AssetDetail({ id }: { id: string }) {
   const { get, loaded, remove, update, retry } = useMedia()
   const lib = useLibrary()
+  const { workspace } = useAccount()
+  const media = useMedia()
   const [collecting, setCollecting] = useState(false)
   const a = get(id)
   const router = useRouter()
@@ -44,6 +50,8 @@ export default function AssetDetail({ id }: { id: string }) {
   const stream = a.playbackUrl ? `${origin}${a.playbackUrl}` : ''
   const embed = `<iframe src="${watch}" width="100%" style="aspect-ratio:16/9;border:0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`
   const ready = a.status === 'ready'
+  // share links only work once the asset is approved (moderation)
+  const shareable = ready && a.moderation === 'approved'
 
   return (
     <>
@@ -56,6 +64,7 @@ export default function AssetDetail({ id }: { id: string }) {
           <h1>{a.title}</h1>
           <div className="asset-head-meta">
             <StatusBadge status={a.status} progress={a.progress} />
+            <ModerationBadge state={a.moderation} />
             <span>
               <TypeIcon type={a.type} />
               {a.type[0].toUpperCase() + a.type.slice(1)}
@@ -66,12 +75,12 @@ export default function AssetDetail({ id }: { id: string }) {
           </div>
         </div>
         <div className="page-actions">
-          {ready && (
+          {shareable && (
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(watch, 'Share link copied — anyone with it can watch')}>
               <Icon name="link" size={15} /> Copy share link
             </button>
           )}
-          {ready && (
+          {shareable && (
             <a href={`/embed/${a.id}`} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">
               Open player <Icon name="external" size={14} />
             </a>
@@ -104,6 +113,41 @@ export default function AssetDetail({ id }: { id: string }) {
           </div>
         </div>
       </div>
+
+      {a.status === 'ready' && a.moderation !== 'approved' && (
+        <div className={`banner ${a.moderation === 'rejected' ? 'is-bad' : 'is-review'}`} role="status">
+          <Icon name={a.moderation === 'rejected' ? 'x' : 'clock'} />
+          <div>
+            <b>{a.moderation === 'rejected' ? 'Rejected — only your workspace can see this.' : 'In review — not public yet.'}</b>{' '}
+            {a.moderationFlags.length ? a.moderationFlags.map((f) => f.reason).join(' · ') : a.moderation === 'pending' ? 'Every upload in this workspace is reviewed before it goes public.' : ''}
+            {a.moderationNote && <small>Note: {a.moderationNote}</small>}
+          </div>
+          {canManage(workspace.role) && (
+            <>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={async () => {
+                  try {
+                    await request('/api/moderation/decide', { method: 'POST', json: { ids: [a.id], decision: 'approve' } })
+                    toast('Approved — it’s public by link now')
+                    await media.refresh()
+                  } catch (e) {
+                    toast(e instanceof Error ? e.message : 'Couldn’t approve.')
+                  }
+                }}
+              >
+                Approve
+              </button>
+              {a.moderation === 'pending' && (
+                <Link href="/dashboard/review" className="btn btn-ghost btn-sm">
+                  Review queue
+                </Link>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {a.status === 'failed' && (
         <div className="banner is-bad" role="alert">
@@ -147,6 +191,7 @@ export default function AssetDetail({ id }: { id: string }) {
                 tabs={[
                   { value: 'renditions', label: 'Renditions', count: a.renditions.length },
                   ...(ready && a.type !== 'image' ? [{ value: 'embed' as Tab, label: 'Embed' }] : []),
+                  ...(ready && a.type !== 'audio' ? [{ value: 'transform' as Tab, label: 'Transform' }] : []),
                 ]}
               />
 
@@ -178,6 +223,8 @@ export default function AssetDetail({ id }: { id: string }) {
                   </div>
                 </Card>
               )}
+
+              {tab === 'transform' && <TransformBuilder asset={a} />}
 
               {tab === 'embed' && (
                 <div className="stack">
@@ -248,9 +295,18 @@ export default function AssetDetail({ id }: { id: string }) {
               </div>
               <div>
                 <dt>Access</dt>
-                <dd>Anyone with the link can watch · original is members-only</dd>
+                <dd>
+                  {a.moderation === 'approved'
+                    ? 'Anyone with the link can watch · original is members-only'
+                    : a.moderation === 'pending'
+                      ? 'Members only until it’s approved'
+                      : 'Members only — rejected in review'}
+                </dd>
               </div>
             </dl>
+          </Card>
+          <Card title="Custom fields">
+            <MetadataEditor asset={a} />
           </Card>
           <Card title="Organise">
             <div className="organise">

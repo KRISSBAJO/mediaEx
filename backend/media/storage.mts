@@ -9,7 +9,7 @@
  * Keys look like `<workspaceId>/<assetId>/original.mov`, `<workspaceId>/<assetId>/hls/v0/seg_001.ts`.
  */
 import { createReadStream, createWriteStream } from 'node:fs'
-import { mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -25,6 +25,7 @@ const TYPES: Record<string, string> = {
   jpeg: 'image/jpeg',
   png: 'image/png',
   webp: 'image/webp',
+  avif: 'image/avif',
   vtt: 'text/vtt',
 }
 export const contentType = (key: string) => TYPES[key.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream'
@@ -51,6 +52,12 @@ export interface Storage {
   serve(key: string, req: Request, opts?: { download?: string }): Promise<Response>
   /** delete everything under a prefix */
   removePrefix(prefix: string): Promise<void>
+  /** store a generated file (transformations) */
+  putBuffer(key: string, data: Buffer, type: string): Promise<void>
+  /** read a whole stored file into memory (small files only), or null when it doesn't exist */
+  getBuffer(key: string): Promise<Buffer | null>
+  /** something FFmpeg can open directly: a local path, or a short-lived signed URL it can range-request */
+  readableUrl(key: string): Promise<string>
 }
 
 async function* walk(dir: string): AsyncGenerator<string> {
@@ -155,6 +162,26 @@ class LocalStorage implements Storage {
   async removePrefix(prefix: string) {
     await rm(this.path(prefix), { recursive: true, force: true })
   }
+
+  async putBuffer(key: string, data: Buffer) {
+    const file = this.path(key)
+    await mkdir(path.dirname(file), { recursive: true })
+    const tmp = `${file}.${process.pid}.part`
+    await writeFile(tmp, data)
+    await rename(tmp, file)
+  }
+
+  async getBuffer(key: string) {
+    try {
+      return await readFile(this.path(key))
+    } catch {
+      return null
+    }
+  }
+
+  async readableUrl(key: string) {
+    return this.path(key)
+  }
 }
 
 /* ------------------------------------------------ S3-compatible bucket */
@@ -240,6 +267,22 @@ class S3Storage implements Storage {
     }
     const query: Record<string, string> = opts.download ? { 'response-content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(opts.download)}` } : {}
     return new Response(null, { status: 302, headers: { Location: await this.presign(key, 'GET', 3600, query), 'Cache-Control': 'private, max-age=600' } })
+  }
+
+  async putBuffer(key: string, data: Buffer, type: string) {
+    const res = await this.aws.fetch(this.url(key), { method: 'PUT', body: new Uint8Array(data), headers: { 'Content-Type': type } })
+    if (!res.ok) throw new Error(`Couldn’t store ${key} (${res.status})`)
+  }
+
+  async getBuffer(key: string) {
+    const res = await this.aws.fetch(this.url(key))
+    if (res.status === 404) return null
+    if (!res.ok) throw new Error(`Couldn’t read ${key} from storage (${res.status})`)
+    return Buffer.from(await res.arrayBuffer())
+  }
+
+  async readableUrl(key: string) {
+    return this.presign(key, 'GET', 3600)
   }
 
   async removePrefix(prefix: string) {

@@ -56,6 +56,8 @@ The API image ships Node.js, the PostgreSQL-backed account service and the media
 | `MAX_UPLOAD_BYTES` | Largest upload accepted (default 5 GiB) |
 | `FFMPEG_PATH`, `FFPROBE_PATH` | Only if FFmpeg isn't on the PATH |
 | `MEDIA_WORKER` | `off` runs an API-only instance that doesn't encode |
+| `MAX_VARIANTS_PER_ASSET` | Cached transformation variants kept per asset (default 200) |
+| `ANTHROPIC_API_KEY` | Optional. Lets workspaces turn on automatic image review in moderation (Claude looks at images and video frames) |
 
 Generate each secret separately with `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. Store production values in service secrets. Register OAuth callbacks at `<BETTER_AUTH_URL>/api/auth/callback/google` or `<BETTER_AUTH_URL>/api/auth/callback/github`.
 
@@ -111,6 +113,49 @@ The frontend forwards `/api/assets`, `/api/uploads` and `/api/media` to the back
   select with the checkboxes (Shift for a range), or drag cards onto a folder or collection.
 - Endpoints live in `backend/media/library.mts`: `/api/folders`, `/api/collections`, `/api/tags`, `/api/searches`.
 
+### Transformations
+
+`GET /api/media/:id/transform` returns a resized, cropped or re-encoded image of an asset: the image itself, a frame of
+a video (`t=` seconds), or an audio asset's waveform. The first request renders it (sharp; FFmpeg pulls video frames
+straight from storage) and stores it under the asset's `derived/` folder; later requests are served from storage.
+
+| Parameter | Values |
+|---|---|
+| `w`, `h` | 1–4096 px. One side scales; both sides fill the box (`fit=cover`) |
+| `dpr` | 1–3, multiplies `w`/`h` for sharp screens |
+| `fit` | `cover` (default with both sides), `contain`, `inside` (default with one side), `outside`, `fill` |
+| `pos` | `center`, `top`, `bottom`, `left`, `right`, `attention` (smart: what stands out), `entropy` (smart: most detail) |
+| `f` | `auto` (default: AVIF or WebP when the browser accepts them), `avif`, `webp`, `jpeg`, `png` |
+| `q` | 1–100 quality (default 80) |
+| `t` | video only: the frame time in seconds |
+| `blur`, `gray`, `rot`, `flip` | blur 1–100, `gray=1`, rotate 90/180/270, flip `h`/`v` |
+| `wm`, `wm_text` | watermark: an image asset in the same workspace, or up to 60 characters of text |
+| `wm_pos`, `wm_w`, `wm_o` | where (`nw` … `se`, default `se`), width as a share of the image (0.05–1, default 0.2), opacity (0–1, default 0.7) |
+
+Unknown parameters and out-of-range values get a 400 that says what's allowed. Output is capped at 16 megapixels,
+each asset keeps up to 200 variants (429 after that), and only two renders run at once. Responses are cacheable for a
+day (`Vary: Accept` for `f=auto`). The asset page's **Transform** tab builds these URLs visually; its live preview uses
+`preview=1`, which renders for workspace members without storing anything.
+
+### Custom metadata
+
+Owners and admins define fields in **Settings → Metadata**: text, long text, number, date, dropdown and multi-select,
+optionally required. Values are stored on each asset as `{ fieldId: value }` (`PATCH /api/assets/:id` with
+`metadata`, keyed by field ID or key), validated against the field, searched by the library search, and dropdown fields
+become filter chips (`m.<fieldId>=<option>` in the URL). The bulk bar can set one field on many assets. Removing an
+option or a field removes its values everywhere. API: `/api/fields`.
+
+### Moderation
+
+**Settings → Moderation** picks a mode per workspace: *Off* (default), *Auto-approve unless flagged*, or *Review every
+upload*. Checks run when an upload finishes processing: a blocklist (whole words in the title, file name, tags and
+custom fields) and, when `ANTHROPIC_API_KEY` is set on the backend and the workspace turns it on, an automatic review
+in which Claude looks at the image or three frames of a video. A declined or failed automatic review sends the upload
+to a person instead of approving it. Until an asset is approved, its share page, stream, thumbnails and
+transformations return 404 to anyone outside the workspace; members can always see it. The **Review** page lists
+what's waiting (flagged first) with approve and reject (with a note). API: `/api/moderation/*`. Assets that existed
+before moderation was turned on stay approved.
+
 Known limits: one `PUT` per upload (no resumable/multipart yet, so 5 GB max); encoding is CPU-only H.264; captions,
 view analytics and signed playback URLs are not built yet.
 
@@ -122,6 +167,7 @@ view analytics and signed playback URLs are not built yet.
 - `app/embed/[id]` — the public player behind share links and iframes
 - `backend/server.mts` — the API service; `backend/media/` — media routes, storage (disk or S3), database access and the pipeline worker
 - `backend/media/types.mts` — media types shared by both services (the frontend imports them through `lib/media/types.ts`)
+- `backend/media/transform.mts`, `fields.mts`, `moderation.mts` — transformations, custom metadata, moderation
 - `lib/sample.ts` — sample analytics, API keys, webhooks and billing data (still to be replaced)
 - `app/globals.css`, `app/dashboard/dashboard.css` — design tokens and styles
 

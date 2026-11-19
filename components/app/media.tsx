@@ -27,7 +27,7 @@ type Media = {
   /** replace or add one asset locally (after a PATCH, say) */
   put: (a: MediaAsset) => void
   remove: (id: string) => Promise<boolean>
-  update: (id: string, patch: { title?: string; tags?: string[]; folderId?: string | null }) => Promise<boolean>
+  update: (id: string, patch: { title?: string; tags?: string[]; folderId?: string | null; metadata?: Record<string, unknown> }) => Promise<boolean>
   retry: (id: string) => Promise<boolean>
   transfers: Transfer[]
   upload: (files: FileList | File[], folderId?: string | null) => void
@@ -101,7 +101,7 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
   }, [])
 
   const update = useCallback(
-    async (id: string, patch: { title?: string; tags?: string[]; folderId?: string | null }) => {
+    async (id: string, patch: { title?: string; tags?: string[]; folderId?: string | null; metadata?: Record<string, unknown> }) => {
       try {
         const { asset } = await json<{ asset: MediaAsset }>(await fetch(`/api/assets/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }))
         put(asset)

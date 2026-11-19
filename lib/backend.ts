@@ -86,7 +86,7 @@ export async function proxyAuth(request: Request) {
  */
 export async function proxyMedia(request: Request) {
   const incoming = new URL(request.url)
-  if (!/^\/api\/(assets|uploads|media|folders|collections|tags|searches)(\/|$)/.test(incoming.pathname)) return new Response(null, { status: 404 })
+  if (!/^\/api\/(assets|uploads|media|folders|collections|tags|searches|fields|moderation)(\/|$)/.test(incoming.pathname)) return new Response(null, { status: 404 })
 
   const headers = new Headers()
   for (const name of ['accept', 'content-type', 'content-length', 'range', 'if-none-match', 'if-modified-since', 'origin', 'referer', 'user-agent']) {
