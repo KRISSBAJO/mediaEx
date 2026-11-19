@@ -85,7 +85,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   req.headers['x-forwarded-proto'] = frontend.protocol.slice(0, -1)
   res.setHeader('cache-control', 'no-store')
   if (pathname.startsWith('/api/auth/')) return await authHandler(req, res)
-  if (/^\/api\/(assets|uploads|media)(\/|$)/.test(pathname)) {
+  if (/^\/api\/(assets|uploads|media|folders|collections|tags|searches)(\/|$)/.test(pathname)) {
     const response = await handleMedia(toWebRequest(req, pathname), pathname)
     if (response) return await sendWeb(res, response)
   }

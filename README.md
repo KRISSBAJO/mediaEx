@@ -99,6 +99,18 @@ The frontend only renders and forwards; everything that touches files or the dat
 The frontend forwards `/api/assets`, `/api/uploads` and `/api/media` to the backend unchanged (`proxyMedia` in
 `lib/backend.ts`), streaming in both directions.
 
+### Organising and finding media
+
+- **Folders** nest; an asset lives in at most one. Deleting a folder moves its assets and subfolders up a level, so
+  nothing is lost. **Collections** group assets from any folder (an asset can be in several). **Tags** are lowercase
+  with dashes, up to 20 per asset.
+- **Search** (`GET /api/assets?q=&folder=&collection=&type=&status=&tags=&date=&sort=`) matches every word against
+  titles, file names, source info and tags (partial words count), then narrows by the filters. The Library keeps the
+  same parameters in its URL, so any view can be bookmarked or shared, and **saved searches** store them per person.
+- **Bulk actions** (`POST /api/assets/bulk`): move, tag, untag and delete up to 500 assets at once. In the Library,
+  select with the checkboxes (Shift for a range), or drag cards onto a folder or collection.
+- Endpoints live in `backend/media/library.mts`: `/api/folders`, `/api/collections`, `/api/tags`, `/api/searches`.
+
 Known limits: one `PUT` per upload (no resumable/multipart yet, so 5 GB max); encoding is CPU-only H.264; captions,
 view analytics and signed playback URLs are not built yet.
 
@@ -106,7 +118,7 @@ view analytics and signed playback URLs are not built yet.
 
 - `app/page.tsx`, `components/` — the landing page (hero, sections, nav, footer)
 - `app/(auth)/` — sign in, sign up, forgot/reset password, accept invitation
-- `app/dashboard/`, `components/app/` — the dashboard shell and pages; `components/app/media.tsx` holds the asset list and upload queue, `MediaPlayer.tsx` the player
+- `app/dashboard/`, `components/app/` — the dashboard shell and pages; `components/app/media.tsx` holds the asset list and upload queue, `MediaPlayer.tsx` the player; `library.tsx` holds folders, collections, tags and saved searches, and `library-ui/` the Library's sidebar, filters, preview and dialogs
 - `app/embed/[id]` — the public player behind share links and iframes
 - `backend/server.mts` — the API service; `backend/media/` — media routes, storage (disk or S3), database access and the pipeline worker
 - `backend/media/types.mts` — media types shared by both services (the frontend imports them through `lib/media/types.ts`)

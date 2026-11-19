@@ -8,6 +8,7 @@ import { authClient, authMessage } from '@/lib/auth-client'
 import { isActive as inPipeline, type MediaAsset } from '@/lib/media/types'
 import { bytes } from '@/lib/sample'
 import { AccountProvider, useAccount, type Account } from './account'
+import { LibraryProvider, useLibrary } from './library'
 import { MediaProvider, useMedia } from './media'
 import Icon from './Icon'
 import { Avatar, Meter, Toaster, toast } from './ui'
@@ -205,6 +206,7 @@ function CommandMenu({ open, onClose }: { open: boolean; onClose: () => void }) 
   const [i, setI] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const { assets } = useMedia()
+  const { folders, collections, folderPath } = useLibrary()
 
   const cmds = useMemo<Cmd[]>(() => {
     const go = (href: string) => () => router.push(href)
@@ -213,14 +215,23 @@ function CommandMenu({ open, onClose }: { open: boolean; onClose: () => void }) 
       { id: 'a-upload', group: 'Actions', label: 'Upload files', icon: 'upload', hint: 'U', run: go('/dashboard/uploads') },
       { id: 'a-key', group: 'Actions', label: 'Create API key', icon: 'key', run: go('/dashboard/developers?new=1') },
       { id: 'a-invite', group: 'Actions', label: 'Invite a teammate', icon: 'users', run: go('/dashboard/settings?tab=team') },
+      ...folders.map((f) => ({
+        id: f.id,
+        group: 'Folders',
+        label: folderPath(f.id).map((x) => x.name).join(' / '),
+        icon: 'library',
+        hint: String(f.assetCount),
+        run: go(`/dashboard/library?folder=${f.id}`),
+      })),
+      ...collections.map((c) => ({ id: c.id, group: 'Collections', label: c.name, icon: 'layers', hint: String(c.assetCount), run: go(`/dashboard/library?collection=${c.id}`) })),
       ...assets.map((a) => ({ id: a.id, group: 'Assets', label: a.title, icon: a.type, hint: a.status, run: go(`/dashboard/library/${a.id}`) })),
     ]
-  }, [router, assets])
+  }, [router, assets, folders, collections, folderPath])
 
   const list = useMemo(() => {
     const s = q.trim().toLowerCase()
-    const hits = s ? cmds.filter((c) => c.label.toLowerCase().includes(s)) : cmds.filter((c) => c.group !== 'Assets').concat(cmds.filter((c) => c.group === 'Assets').slice(0, 4))
-    return hits.slice(0, 14)
+    const hits = s ? cmds.filter((c) => c.label.toLowerCase().includes(s)) : cmds.filter((c) => c.group === 'Pages' || c.group === 'Actions').concat(cmds.filter((c) => c.group === 'Assets').slice(0, 4))
+    return hits.slice(0, 16)
   }, [q, cmds])
 
   useEffect(() => {
@@ -325,7 +336,9 @@ export default function Shell({ account, initialAssets, children }: { account: A
     <AccountProvider value={account}>
       {/* keyed by workspace so switching workspaces starts from that workspace's media */}
       <MediaProvider key={account.workspace.id} initial={initialAssets}>
-        <ShellInner>{children}</ShellInner>
+        <LibraryProvider>
+          <ShellInner>{children}</ShellInner>
+        </LibraryProvider>
       </MediaProvider>
     </AccountProvider>
   )

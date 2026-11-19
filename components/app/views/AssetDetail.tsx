@@ -7,6 +7,8 @@ import { STAGES, isActive } from '@/lib/media/types'
 import { bytes, duration as fmtDuration } from '@/lib/sample'
 import Icon from '../Icon'
 import MediaPlayer from '../MediaPlayer'
+import { flatTree, useLibrary } from '../library'
+import { CollectDialog, TagInput } from '../library-ui/dialogs'
 import { Ago, dims, useMedia } from '../media'
 import { Card, StatusBadge, Tabs, TypeIcon, copyText } from '../ui'
 
@@ -14,6 +16,8 @@ type Tab = 'renditions' | 'embed'
 
 export default function AssetDetail({ id }: { id: string }) {
   const { get, loaded, remove, update, retry } = useMedia()
+  const lib = useLibrary()
+  const [collecting, setCollecting] = useState(false)
   const a = get(id)
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('renditions')
@@ -21,7 +25,6 @@ export default function AssetDetail({ id }: { id: string }) {
   const [confirm, setConfirm] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [title, setTitle] = useState('')
-  const [tagInput, setTagInput] = useState<string | null>(null)
   const [origin, setOrigin] = useState('')
   useEffect(() => setOrigin(window.location.origin), [])
 
@@ -41,10 +44,6 @@ export default function AssetDetail({ id }: { id: string }) {
   const stream = a.playbackUrl ? `${origin}${a.playbackUrl}` : ''
   const embed = `<iframe src="${watch}" width="100%" style="aspect-ratio:16/9;border:0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`
   const ready = a.status === 'ready'
-
-  const saveTags = async (next: string[]) => {
-    if (await update(a.id, { tags: next })) setTagInput(null)
-  }
 
   return (
     <>
@@ -253,34 +252,46 @@ export default function AssetDetail({ id }: { id: string }) {
               </div>
             </dl>
           </Card>
-          <Card title="Tags">
-            <div className="tags">
-              {a.tags.map((t) => (
-                <button key={t} type="button" className="tag" title={`Remove ${t}`} onClick={() => void saveTags(a.tags.filter((x) => x !== t))}>
-                  {t} <Icon name="x" size={12} />
-                </button>
-              ))}
-              {tagInput === null ? (
-                <button type="button" className="tag-add" onClick={() => setTagInput('')}>
-                  <Icon name="plus" size={13} /> Add
-                </button>
-              ) : (
-                <form
-                  className="tag-form"
-                  onSubmit={(e) => {
-                    e.preventDefault()
-                    const t = tagInput.trim()
-                    if (t) void saveTags([...a.tags, t])
-                    else setTagInput(null)
-                  }}
-                >
-                  <input className="input" autoFocus value={tagInput} maxLength={32} placeholder="New tag" aria-label="New tag" onChange={(e) => setTagInput(e.target.value)} onBlur={() => !tagInput.trim() && setTagInput(null)} />
-                </form>
-              )}
+          <Card title="Organise">
+            <div className="organise">
+              <label className="field-d">
+                <span>Folder</span>
+                <select className="select" value={a.folderId ?? ''} onChange={(e) => void update(a.id, { folderId: e.target.value || null })}>
+                  <option value="">No folder</option>
+                  {flatTree(lib.folders).map(({ folder, depth }) => (
+                    <option key={folder.id} value={folder.id}>
+                      {'\u00a0\u00a0'.repeat(depth)}
+                      {depth ? '└ ' : ''}
+                      {folder.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="field-d">
+                <span>Tags</span>
+                <TagInput value={a.tags} onChange={(tags) => void update(a.id, { tags })} />
+              </div>
+              <div className="field-d">
+                <span>Collections</span>
+                <div className="tags">
+                  {lib.collections
+                    .filter((c) => a.collectionIds.includes(c.id))
+                    .map((c) => (
+                      <button key={c.id} type="button" className="tag" title={`Remove from ${c.name}`} onClick={() => void lib.collect(c.id, [a.id], true)}>
+                        {c.name} <Icon name="x" size={12} />
+                      </button>
+                    ))}
+                  <button type="button" className="tag-add" onClick={() => setCollecting(true)}>
+                    <Icon name="plus" size={13} /> Add
+                  </button>
+                </div>
+              </div>
             </div>
           </Card>
         </aside>
       </div>
+
+      {collecting && <CollectDialog count={1} onClose={() => setCollecting(false)} onPick={(cid) => lib.collect(cid, [a.id])} />}
 
       {renaming && (
         <div className="dialog-scrim" onPointerDown={(e) => e.target === e.currentTarget && setRenaming(false)}>

@@ -12,11 +12,15 @@
  *   GET    /api/media/:id/info               public player info (share/embed page)
  *   GET    /api/media/:id/<file>             playback files, public by link; /original is members-only
  *
- * The frontend forwards these paths unchanged (see app/api/{assets,uploads,media}).
+ *   GET    /api/assets?q=&folder=&…         search: same parameters as the Library URL (see parseQuery)
+ *   (folders, collections, tags, saved searches and bulk actions: see library.mts)
+ *
+ * The frontend forwards these paths unchanged (see app/api/*).
  */
 import { pool } from '../auth.mts'
-import { guessType } from './types.mts'
-import { MAX_UPLOAD_BYTES, HttpError, getAssetRow, handle, isMemberOf, listAssets, newAssetId, prefixOf, requireMember, toDTO } from './assets.mts'
+import { guessType, normaliseTag, parseQuery } from './types.mts'
+import { MAX_UPLOAD_BYTES, HttpError, getAssetRow, handle, isMemberOf, newAssetId, prefixOf, requireMember, searchAssets, toDTO } from './assets.mts'
+import { bulk, handleLibrary } from './library.mts'
 import { isLocal, storage } from './storage.mts'
 import { kickWorker } from './worker.mts'
 
@@ -38,7 +42,17 @@ export const isDurable = () => storage().kind === 's3' || Boolean(process.env.ME
 /* ------------------------------------------------ assets */
 async function listAll(req: Request) {
   const { orgId } = await requireMember(req.headers)
-  return Response.json({ assets: (await listAssets(orgId)).map(toDTO) }, { headers: noStore })
+  const query = parseQuery(new URL(req.url).searchParams)
+  return Response.json({ assets: (await searchAssets(orgId, query)).map(toDTO) }, { headers: noStore })
+}
+
+/** A folder id from a request, checked to belong to the workspace (null = no folder). */
+async function folderOf(orgId: string, v: unknown) {
+  if (v === null || v === undefined || v === '') return null
+  if (typeof v !== 'string' || !/^fld_[a-z0-9]{4,24}$/.test(v)) throw new HttpError(404, 'That folder doesn’t exist.')
+  const { rows } = await pool.query('select id from "folder" where id = $1 and "organizationId" = $2', [v, orgId])
+  if (!rows[0]) throw new HttpError(404, 'That folder doesn’t exist.')
+  return v
 }
 
 async function one(req: Request, id: string) {
@@ -49,16 +63,17 @@ async function one(req: Request, id: string) {
   if (req.method === 'GET') return Response.json({ asset: toDTO(row) }, { headers: noStore })
 
   if (req.method === 'PATCH') {
-    const b = await body<{ title?: unknown; tags?: unknown }>(req)
+    const b = await body<{ title?: unknown; tags?: unknown; folderId?: unknown }>(req)
     const title = b?.title === undefined ? row.title : typeof b.title === 'string' ? b.title.trim() : ''
     if (!title || title.length > 200) throw new HttpError(400, 'Titles need 1–200 characters.')
     let tags = row.tags
     if (b?.tags !== undefined) {
       if (!Array.isArray(b.tags)) throw new HttpError(400, 'Tags must be a list.')
-      tags = [...new Set(b.tags.filter((t): t is string => typeof t === 'string').map((t) => t.trim().toLowerCase().replace(/\s+/g, '-')).filter(Boolean))]
+      tags = [...new Set(b.tags.filter((t): t is string => typeof t === 'string').map(normaliseTag).filter(Boolean))]
       if (tags.length > 20 || tags.some((t) => t.length > 32)) throw new HttpError(400, 'Use up to 20 tags of 32 characters or fewer.')
     }
-    await pool.query(`update "asset" set title = $2, tags = $3, "updatedAt" = now() where id = $1`, [id, title, tags])
+    const folderId = b?.folderId === undefined ? row.folderId : await folderOf(orgId, b.folderId)
+    await pool.query(`update "asset" set title = $2, tags = $3, "folderId" = $4, "updatedAt" = now() where id = $1`, [id, title, tags, folderId])
     return Response.json({ asset: toDTO((await getAssetRow(id, orgId))!) })
   }
 
@@ -84,7 +99,7 @@ async function retry(req: Request, id: string) {
 async function startUpload(req: Request) {
   const { user, orgId } = await requireMember(req.headers)
   assertDurableStorage()
-  const b = await body<{ fileName?: unknown; size?: unknown; mimeType?: unknown }>(req)
+  const b = await body<{ fileName?: unknown; size?: unknown; mimeType?: unknown; folderId?: unknown }>(req)
   const fileName = typeof b?.fileName === 'string' ? b.fileName.trim().slice(0, 255) : ''
   const size = typeof b?.size === 'number' ? Math.floor(b.size) : 0
   const mimeType = typeof b?.mimeType === 'string' ? b.mimeType.slice(0, 120) : null
@@ -94,14 +109,15 @@ async function startUpload(req: Request) {
   const type = guessType(fileName, mimeType)
   if (!type) throw new HttpError(415, `${fileName} isn’t a video, audio or image file MediaEX can process.`)
 
+  const folderId = await folderOf(orgId, b?.folderId)
   const id = newAssetId()
   const ext = /\.([a-z0-9]{1,8})$/i.exec(fileName)?.[1]?.toLowerCase()
   const originalKey = `${orgId}/${id}/original${ext ? `.${ext}` : ''}`
   const title = fileName.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim() || fileName
   await pool.query(
-    `insert into "asset" (id, "organizationId", "createdBy", title, type, status, "fileName", "mimeType", size, "originalKey")
-     values ($1, $2, $3, $4, $5, 'uploading', $6, $7, $8, $9)`,
-    [id, orgId, user.id, title, type, fileName, mimeType, size, originalKey],
+    `insert into "asset" (id, "organizationId", "createdBy", title, type, status, "fileName", "mimeType", size, "originalKey", "folderId")
+     values ($1, $2, $3, $4, $5, 'uploading', $6, $7, $8, $9, $10)`,
+    [id, orgId, user.id, title, type, fileName, mimeType, size, originalKey, folderId],
   )
   const row = await getAssetRow(id, orgId)
   return Response.json({ asset: toDTO(row!), upload: await storage().uploadTarget(originalKey, id) }, { status: 201 })
@@ -163,7 +179,9 @@ async function media(req: Request, id: string, rel: string) {
 export async function handleMedia(req: Request, pathname: string): Promise<Response | null> {
   const m = req.method
   const parts = pathname.split('/').filter(Boolean) // ['api', 'assets', ...]
-  if (parts[0] !== 'api' || !['assets', 'uploads', 'media'].includes(parts[1])) return null
+  if (parts[0] !== 'api' || !['assets', 'uploads', 'media', 'folders', 'collections', 'tags', 'searches'].includes(parts[1])) return null
+  if (['folders', 'collections', 'tags', 'searches'].includes(parts[1])) return handle(() => handleLibrary(req, parts))
+  if (parts[1] === 'assets' && parts[2] === 'bulk' && parts.length === 3) return handle(() => bulk(req))
   let id: string | undefined
   try {
     id = parts[2] === undefined ? undefined : decodeURIComponent(parts[2])
