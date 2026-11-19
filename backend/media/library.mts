@@ -19,7 +19,8 @@
  */
 import { randomBytes } from 'node:crypto'
 import { pool } from '../auth.mts'
-import { HttpError, prefixOf, requireMember } from './assets.mts'
+import { HttpError, getAssetRow, prefixOf, requireMember } from './assets.mts'
+import { emitAsset } from './webhooks.mts'
 import { listFields, validateValue } from './fields.mts'
 import { storage } from './storage.mts'
 import { normaliseTag, parseQuery, queryParams, type Collection, type Folder, type SavedSearch, type SearchQuery } from './types.mts'
@@ -312,6 +313,7 @@ export async function bulk(req: Request) {
     return Response.json({ changed: ids.length })
   }
   if (b.action === 'delete') {
+    for (const r of await Promise.all(ids.map((id) => getAssetRow(id, orgId)))) if (r) await emitAsset(r, 'asset.deleted')
     const { rows } = await pool.query<{ id: string; organizationId: string }>('delete from "asset" where id = any($1::text[]) returning id, "organizationId"', [ids])
     const store = storage()
     for (let i = 0; i < rows.length; i += 5) await Promise.all(rows.slice(i, i + 5).map((r) => store.removePrefix(prefixOf(r))))

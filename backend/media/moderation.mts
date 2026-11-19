@@ -23,6 +23,7 @@ import { pool } from '../auth.mts'
 import { HttpError, getAssetRow, requireMember, toDTO, type AssetRow } from './assets.mts'
 import { listFields } from './fields.mts'
 import { storage } from './storage.mts'
+import { emitAsset } from './webhooks.mts'
 import type { ModerationFlag, ModerationMode, ModerationSettings } from './types.mts'
 
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg'
@@ -162,6 +163,7 @@ export async function reviewAsset(id: string, force = false) {
     `update "asset" set moderation = $2, "moderationFlags" = $3, "moderatedBy" = null, "moderatedAt" = null, "moderationNote" = null where id = $1`,
     [id, state, JSON.stringify(flags)],
   )
+  if (state === 'pending') await emitAsset(id, 'asset.review_required')
 }
 
 /* ------------------------------------------------ routes */
@@ -223,6 +225,7 @@ export async function handleModeration(req: Request, sub?: string) {
         where "organizationId" = $1 and id = any($2::text[])`,
       [orgId, ids, decision, user.id, note],
     )
+    for (const id of ids) await emitAsset(id, decision === 'approved' ? 'asset.approved' : 'asset.rejected')
     return Response.json({ changed: rowCount })
   }
 

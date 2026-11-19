@@ -1,6 +1,6 @@
 /** Server-side access to media assets. Every query is scoped to a workspace. */
 import { randomBytes } from 'node:crypto'
-import { auth, pool } from '../auth.mts'
+import { auth, baseURL, pool } from '../auth.mts'
 import type { MediaAsset, MediaStatus, MediaType, ModerationFlag, ModerationState, Rendition, SearchQuery } from './types.mts'
 
 export type AssetRow = {
@@ -8,6 +8,7 @@ export type AssetRow = {
   organizationId: string
   createdBy: string | null
   createdByName?: string | null
+  uploadedVia?: string | null
   title: string
   type: MediaType
   status: MediaStatus
@@ -70,7 +71,7 @@ export function toDTO(a: AssetRow): MediaAsset {
     tags: a.tags ?? [],
     createdAt: new Date(a.createdAt).toISOString(),
     readyAt: a.readyAt ? new Date(a.readyAt).toISOString() : null,
-    createdBy: a.createdByName ?? null,
+    createdBy: a.createdByName ?? a.uploadedVia ?? null,
     // the thumbnail is made early in the pipeline, so it shows while the asset is still encoding
     thumbUrl: fileUrl(a, a.thumbKey),
     posterUrl: fileUrl(a, a.posterKey ?? a.thumbKey),
@@ -82,6 +83,13 @@ export function toDTO(a: AssetRow): MediaAsset {
     moderationFlags: a.moderationFlags ?? [],
     moderationNote: a.moderationNote ?? null,
   }
+}
+
+/** The DTO for API and webhook consumers: file URLs are absolute, so they work outside the dashboard. */
+export function apiAsset(a: AssetRow): MediaAsset {
+  const d = toDTO(a)
+  const abs = (u: string | null) => (u ? `${baseURL}${u}` : null)
+  return { ...d, thumbUrl: abs(d.thumbUrl), posterUrl: abs(d.posterUrl), playbackUrl: abs(d.playbackUrl) }
 }
 
 const SELECT = `select a.*, u.name as "createdByName",
@@ -111,7 +119,7 @@ const INTERVALS = { '1d': '1 day', '7d': '7 days', '30d': '30 days', '365d': '36
  * Searches a workspace's assets. Every word of `q` must appear in the title, file name, source info or a tag
  * (case-insensitive, partial words count); every other filter narrows further.
  */
-export async function searchAssets(orgId: string, query: SearchQuery, limit = 500): Promise<AssetRow[]> {
+export async function searchAssets(orgId: string, query: SearchQuery, limit = 500, offset = 0): Promise<AssetRow[]> {
   const where = ['a."organizationId" = $1']
   const args: unknown[] = [orgId]
   const arg = (v: unknown) => (args.push(v), `$${args.length}`)
@@ -145,7 +153,7 @@ export async function searchAssets(orgId: string, query: SearchQuery, limit = 50
       ? `case when lower(a.title) like ${arg(escapeLike(phrase) + '%')} then 0 when a.title ilike ${arg(contains(phrase))} then 1 else 2 end, a."createdAt" desc`
       : SORT_SQL[sort === 'relevance' ? 'new' : sort]
 
-  const { rows } = await pool.query<AssetRow>(`${SELECT} where ${where.join(' and ')} order by ${order} limit ${Math.min(1000, Math.max(1, limit))}`, args)
+  const { rows } = await pool.query<AssetRow>(`${SELECT} where ${where.join(' and ')} order by ${order} limit ${Math.min(1000, Math.max(1, Math.floor(limit)))} offset ${Math.max(0, Math.floor(offset))}`, args)
   return rows
 }
 
@@ -189,7 +197,10 @@ export async function handle(fn: () => Promise<Response>) {
   try {
     return await fn()
   } catch (e) {
-    if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status })
+    if (e instanceof HttpError) {
+      const retryAfter = (e as HttpError & { retryAfter?: number }).retryAfter
+      return Response.json({ error: e.message }, { status: e.status, headers: retryAfter ? { 'Retry-After': String(retryAfter) } : undefined })
+    }
     console.error('[media]', e)
     return Response.json({ error: 'Something went wrong on our side. Try again.' }, { status: 500 })
   }

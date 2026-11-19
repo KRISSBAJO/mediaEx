@@ -81,20 +81,27 @@ export async function proxyAuth(request: Request) {
 }
 
 /**
- * Forwards the media API (/api/assets, uploads, media, folders, collections, tags, searches) to the backend, streaming both ways so large uploads
+ * Forwards the media API (/api/assets, uploads, media, folders, collections, tags, searches, keys, webhooks, v1) to the backend, streaming both ways so large uploads
  * and video segments never sit in memory. Redirects (presigned bucket URLs) pass through to the browser.
  */
 export async function proxyMedia(request: Request) {
   const incoming = new URL(request.url)
-  if (!/^\/api\/(assets|uploads|media|folders|collections|tags|searches|fields|moderation)(\/|$)/.test(incoming.pathname)) return new Response(null, { status: 404 })
+  if (!/^\/api\/(assets|uploads|media|folders|collections|tags|searches|fields|moderation|keys|webhooks|v1)(\/|$)/.test(incoming.pathname)) return new Response(null, { status: 404 })
 
   const headers = new Headers()
   for (const name of ['accept', 'content-type', 'content-length', 'range', 'if-none-match', 'if-modified-since', 'origin', 'referer', 'user-agent']) {
     const value = request.headers.get(name)
     if (value !== null) headers.set(name, value)
   }
-  const cookie = authCookies(request.headers)
-  if (cookie) headers.set('cookie', cookie)
+  // the public API (/api/v1) authenticates with an API key and never with the browser's session
+  const publicApi = /^\/api\/v1(\/|$)/.test(incoming.pathname)
+  if (publicApi) {
+    const authorization = request.headers.get('authorization')
+    if (authorization !== null) headers.set('authorization', authorization)
+  } else {
+    const cookie = authCookies(request.headers)
+    if (cookie) headers.set('cookie', cookie)
+  }
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD'
 
   try {
@@ -104,7 +111,7 @@ export async function proxyMedia(request: Request) {
     const outgoing = new Headers()
     for (const name of [
       'content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control', 'content-disposition',
-      'location', 'etag', 'last-modified', 'access-control-allow-origin',
+      'location', 'etag', 'last-modified', 'access-control-allow-origin', 'retry-after',
     ]) {
       const value = response.headers.get(name)
       if (value !== null) outgoing.set(name, value)

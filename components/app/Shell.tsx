@@ -410,7 +410,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
           <div className="top-actions">
-            <span className="sample-pill" title="Your account, team and media are real. Analytics, API keys, webhooks and billing are sample data until those backends exist.">
+            <span className="sample-pill" title="Your account, team, media, API keys and webhooks are real. Analytics and billing are sample data until those backends exist.">
               Sample analytics
             </span>
             <button type="button" className="search-btn" onClick={() => setCmd(true)}>
