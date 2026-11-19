@@ -2,33 +2,25 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { ACTIVITY, ASSETS, COUNTRIES, PIPELINE, compact, metric, relDay, type Range } from '@/lib/sample'
+import { STAGES, isActive, type MediaAsset } from '@/lib/media/types'
+import { COUNTRIES, bytes, compact, metric, type Range } from '@/lib/sample'
 import { useAccount } from '../account'
+import { Ago, useMedia } from '../media'
 import { BarList, LineChart, ViewToggle } from '../charts'
 import Icon from '../Icon'
 import { Card, PageHead, RANGES, Segmented, StatTile, StatusBadge, Thumb, TypeIcon } from '../ui'
 
 const PERIOD: Record<Range, string> = { '7d': '7 days', '30d': '30 days', '90d': '90 days' }
 
-/** a pretend live encoding queue: progress creeps forward so the page feels alive */
-function useQueue() {
-  const start = ASSETS.filter((a) => a.status === 'processing' || a.status === 'queued').map((a) => ({ ...a, p: a.status === 'queued' ? 0 : a.progress }))
-  const [items, setItems] = useState(start)
-  useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    const id = setInterval(() => {
-      setItems((xs) =>
-        xs.map((x, i) => {
-          if (x.status === 'queued' && i === xs.length - 1 && xs.every((o) => o === x || o.p > 60)) return { ...x, status: 'processing', p: 1 }
-          if (x.status !== 'processing') return x
-          const p = x.p >= 100 ? 100 : Math.min(100, x.p + Math.random() * 2.2)
-          return { ...x, p, status: p >= 100 ? 'ready' : 'processing' }
-        }),
-      )
-    }, 1200)
-    return () => clearInterval(id)
-  }, [])
-  return items
+/** recent things that happened to the workspace's media, newest first */
+function activity(assets: MediaAsset[]) {
+  const out: { at: string; who: string; what: string; target: string; id: string; bad?: boolean }[] = []
+  for (const a of assets) {
+    out.push({ at: a.createdAt, who: a.createdBy ?? 'Someone', what: 'uploaded', target: a.title, id: a.id })
+    if (a.readyAt) out.push({ at: a.readyAt, who: 'Pipeline', what: 'finished', target: a.title, id: a.id })
+    if (a.status === 'failed') out.push({ at: a.createdAt, who: 'Pipeline', what: 'failed on', target: a.title, id: a.id, bad: true })
+  }
+  return out.sort((x, y) => y.at.localeCompare(x.at)).slice(0, 6)
 }
 
 export default function Overview() {
@@ -40,9 +32,11 @@ export default function Overview() {
   const start = metric(13, range, 38, { trend: -0.001, noise: 0.06, weekly: 0.02 })
   const bandwidth = metric(14, range, 640, { trend: 0.005 })
   const avgStart = Math.round(start.total / start.points.length)
-  const queue = useQueue()
-  const recent = [...ASSETS].sort((a, b) => a.createdDaysAgo - b.createdDaysAgo).slice(0, 6)
-  const top = ASSETS.filter((a) => a.views).sort((a, b) => b.views - a.views).slice(0, 5)
+  const { assets } = useMedia()
+  const queue = assets.filter(isActive).slice(0, 5)
+  const recent = assets.slice(0, 6)
+  const byType = (['video', 'audio', 'image'] as const).map((t) => ({ label: t === 'video' ? 'Video' : t === 'audio' ? 'Audio' : 'Images', value: assets.filter((a) => a.type === t).length }))
+  const stored = assets.reduce((t, a) => t + a.size + a.outputSize, 0)
   const [greet, setGreet] = useState('Welcome back')
   useEffect(() => {
     const h = new Date().getHours()
@@ -51,10 +45,13 @@ export default function Overview() {
 
   return (
     <>
-      <PageHead title={`${greet}, ${user.name.split(' ')[0]}`} sub="Here is how your media performed, and what the pipeline is working on.">
+      <PageHead title={`${greet}, ${user.name.split(' ')[0]}`} sub="What the pipeline is working on, and how your media is doing.">
         <Segmented label="Date range" value={range} options={RANGES} onChange={setRange} />
       </PageHead>
 
+      <p className="section-note">
+        <span className="overline">Audience</span> Sample data until view tracking is connected
+      </p>
       <div className="grid-ruled stat-tiles">
         <StatTile label="Views" value={compact(views.total)} delta={views.delta} points={views.points} period={PERIOD[range]} />
         <StatTile label="Watch time" value={compact(watch.total)} unit="hrs" delta={watch.delta} points={watch.points} period={PERIOD[range]} />
@@ -64,18 +61,9 @@ export default function Overview() {
 
       <div className="grid-2">
         <div className="stack">
-          <Card title="Views" meta={`Last ${PERIOD[range]}`} action={<ViewToggle table={table} onChange={setTable} />}>
-            <div className="figure">
-              <strong>{views.total.toLocaleString('en-US')}</strong>
-              <span className={views.delta >= 0 ? 'is-good' : 'is-bad'}>
-                {views.delta >= 0 ? '↑' : '↓'} {Math.abs(views.delta * 100).toFixed(1)}% vs previous {PERIOD[range]}
-              </span>
-            </div>
-            <LineChart points={views.points} label={`Daily views, last ${PERIOD[range]}`} table={table} yHead="Views" />
-          </Card>
-
           <Card
             title="Recent uploads"
+            meta={`${assets.length} in library`}
             flush
             action={
               <Link href="/dashboard/library" className="panel-link">
@@ -83,98 +71,134 @@ export default function Overview() {
               </Link>
             }
           >
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Asset</th>
-                    <th>Status</th>
-                    <th className="num">Views</th>
-                    <th className="num">Added</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recent.map((a) => (
-                    <tr key={a.id}>
-                      <td>
-                        <Link href={`/dashboard/library/${a.id}`} className="asset-cell">
-                          <Thumb asset={a} />
-                          <span>
-                            <b>{a.title}</b>
-                            <small>
-                              <TypeIcon type={a.type} />
-                              {a.resolution}
-                            </small>
-                          </span>
-                        </Link>
-                      </td>
-                      <td>
-                        <StatusBadge status={a.status} progress={a.progress} />
-                      </td>
-                      <td className="num">{a.views ? compact(a.views) : '—'}</td>
-                      <td className="num muted">{relDay(a.createdDaysAgo)}</td>
+            {recent.length ? (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Asset</th>
+                      <th>Status</th>
+                      <th className="num">Size</th>
+                      <th className="num">Added</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {recent.map((a) => (
+                      <tr key={a.id}>
+                        <td>
+                          <Link href={`/dashboard/library/${a.id}`} className="asset-cell">
+                            <Thumb asset={a} />
+                            <span>
+                              <b>{a.title}</b>
+                              <small>
+                                <TypeIcon type={a.type} />
+                                {a.sourceInfo ?? a.fileName}
+                              </small>
+                            </span>
+                          </Link>
+                        </td>
+                        <td>
+                          <StatusBadge status={a.status} progress={a.progress} />
+                        </td>
+                        <td className="num">{bytes(a.size)}</td>
+                        <td className="num muted">
+                          <Ago iso={a.createdAt} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="empty">
+                <Icon name="upload" size={22} />
+                <b>Nothing uploaded yet</b>
+                <p>Your first upload shows up here while it encodes.</p>
+                <Link href="/dashboard/uploads" className="btn btn-primary btn-sm">
+                  Upload files
+                </Link>
+              </div>
+            )}
+          </Card>
+
+          <Card title="Views" meta={`Sample data · last ${PERIOD[range]}`} action={<ViewToggle table={table} onChange={setTable} />}>
+            <div className="figure">
+              <strong>{views.total.toLocaleString('en-US')}</strong>
+              <span className={views.delta >= 0 ? 'is-good' : 'is-bad'}>
+                {views.delta >= 0 ? '↑' : '↓'} {Math.abs(views.delta * 100).toFixed(1)}% vs previous {PERIOD[range]}
+              </span>
             </div>
+            <LineChart points={views.points} label={`Daily views, last ${PERIOD[range]} (sample data)`} table={table} yHead="Views" />
           </Card>
         </div>
 
         <div className="stack">
           <Card
             title="Pipeline"
-            meta={`${queue.filter((q) => q.status !== 'ready').length} jobs`}
+            meta={queue.length ? `${queue.length} ${queue.length === 1 ? 'job' : 'jobs'}` : 'Idle'}
             action={
-              <span className="live-tag">
-                <i />
-                Live
-              </span>
+              queue.length ? (
+                <span className="live-tag">
+                  <i />
+                  Live
+                </span>
+              ) : undefined
             }
           >
-            <ul className="queue">
-              {queue.map((q) => {
-                const stage = q.status === 'queued' ? -1 : Math.min(PIPELINE.length - 1, Math.floor((q.p / 100) * PIPELINE.length))
-                return (
-                  <li key={q.id}>
-                    <div className="queue-top">
-                      <Link href={`/dashboard/library/${q.id}`}>{q.title}</Link>
-                      <StatusBadge status={q.status} progress={q.status === 'processing' ? Math.round(q.p) : undefined} />
-                    </div>
-                    <div className="stages" aria-label={q.status === 'queued' ? 'Waiting to start' : `Stage: ${PIPELINE[stage]}`}>
-                      {PIPELINE.map((s, i) => (
-                        <span key={s} className={q.status === 'ready' || i < stage ? 'is-done' : i === stage ? 'is-now' : ''}>
-                          <i />
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
+            {queue.length ? (
+              <ul className="queue">
+                {queue.map((q) => {
+                  const now = q.status === 'uploading' ? 0 : q.status === 'queued' ? -1 : q.stage
+                  return (
+                    <li key={q.id}>
+                      <div className="queue-top">
+                        <Link href={`/dashboard/library/${q.id}`}>{q.title}</Link>
+                        <StatusBadge status={q.status} progress={q.progress} />
+                      </div>
+                      <div className="stages stages-4" aria-label={q.status === 'queued' ? 'Waiting to start' : `Stage: ${STAGES[Math.max(0, now)]}`}>
+                        {STAGES.map((s, i) => (
+                          <span key={s} className={(q.status === 'queued' ? i === 0 : i < now) ? 'is-done' : i === now ? 'is-now' : ''}>
+                            <i />
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : (
+              <p className="quiet-note">Nothing is encoding right now. New uploads appear here as they move through the pipeline.</p>
+            )}
           </Card>
 
-          <Card title="Top assets" meta="By views, all time">
-            <BarList points={top.map((a) => ({ label: a.title, value: a.views }))} format={compact} />
-          </Card>
-
-          <Card title="Top countries" meta={`Last ${PERIOD[range]}`}>
-            <BarList points={COUNTRIES.slice(0, 5)} format={compact} />
+          <Card title="Library" meta={`${bytes(stored)} stored`}>
+            <BarList points={byType} format={(v) => String(v)} max={Math.max(1, assets.length)} />
           </Card>
 
           <Card title="Activity">
-            <ul className="activity">
-              {ACTIVITY.map((a, i) => (
-                <li key={i}>
-                  <span className={`act-dot ${a.what.startsWith('failed') ? 'is-bad' : ''}`} />
-                  <p>
-                    <b>{a.who}</b> {a.what} {a.target && <em>{a.target}</em>}
-                  </p>
-                  <time>{a.when}</time>
-                </li>
-              ))}
-            </ul>
+            {assets.length ? (
+              <ul className="activity">
+                {activity(assets).map((e, i) => (
+                  <li key={i}>
+                    <span className={`act-dot ${e.bad ? 'is-bad' : ''}`} />
+                    <p>
+                      <b>{e.who}</b> {e.what}{' '}
+                      <Link href={`/dashboard/library/${e.id}`}>
+                        <em>{e.target}</em>
+                      </Link>
+                    </p>
+                    <Ago iso={e.at} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="quiet-note">Uploads, finished encodes and failures show up here.</p>
+            )}
+          </Card>
+
+          <Card title="Top countries" meta={`Sample data · last ${PERIOD[range]}`}>
+            <BarList points={COUNTRIES.slice(0, 5)} format={compact} />
           </Card>
         </div>
       </div>

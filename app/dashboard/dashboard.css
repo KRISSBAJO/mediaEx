@@ -2598,3 +2598,240 @@ a.asset-cell:hover b {
 .stack > .banner {
   margin-bottom: 0;
 }
+
+/* ------------------------------------------------ real media */
+.thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.thumb-audio img {
+  object-fit: contain;
+  padding: 10% 6%;
+}
+.thumb.is-empty {
+  display: grid;
+  place-items: center;
+  color: var(--dim);
+  background: linear-gradient(180deg, #191918, #111110);
+}
+.status-uploading {
+  color: var(--text);
+  border-color: var(--line-2);
+}
+
+/* player: the real <video>, a poster for images, or where the asset is in the pipeline */
+.player-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+.player-media,
+.player-still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+.player-media.is-audio {
+  background: radial-gradient(70% 90% at 50% 50%, #1a1a19, #0b0b0a);
+}
+.player-state {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+.player-state b {
+  font-weight: 500;
+}
+.player-state small {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.player-state svg {
+  color: var(--bad);
+}
+.player-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+.player-error {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 60px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid rgb(255 107 110 / 0.3);
+  border-radius: 8px;
+  background: rgba(20, 10, 10, 0.85);
+  font-size: 13px;
+}
+.player-fs {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.player-fs:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.player:fullscreen {
+  border: 0;
+  border-radius: 0;
+}
+.player:fullscreen .player-frame {
+  height: 100%;
+  aspect-ratio: auto;
+}
+.stages-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.tags .tag {
+  border-style: solid;
+  cursor: pointer;
+}
+.tags .tag svg {
+  opacity: 0.5;
+}
+.tags .tag:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+.tags .tag:hover svg {
+  opacity: 1;
+}
+.tag-form .input {
+  width: 140px;
+  height: 28px;
+  font-size: 12.5px;
+}
+.rows li > div.thumb.row-thumb {
+  flex: none;
+  width: 56px;
+  border-radius: 4px;
+}
+.rows .row-thumb .thumb-dur {
+  display: none;
+}
+.row-link:hover b {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--dim);
+}
+.rows small.is-bad {
+  color: var(--bad);
+  white-space: normal;
+}
+.meter.is-upload i {
+  background: var(--accent);
+}
+.steps-list {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+.steps-list li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 2px 12px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  counter-increment: step;
+}
+.steps-list li::before {
+  content: counter(step);
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.steps-list b {
+  font-weight: 500;
+}
+.steps-list span {
+  color: var(--muted);
+}
+.facts {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0 0 0 18px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.section-note {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 10px;
+  color: var(--dim);
+  font-size: 12.5px;
+}
+.quiet-note {
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.activity time {
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.activity a:hover em {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--dim);
+}
+
+/* ------------------------------------------------ public embed / share page */
+.embed {
+  --good: #3fcf8e;
+  --warn: #f5a524;
+  --bad: #ff6b6e;
+  --raise: #141413;
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: #000;
+}
+.embed .player {
+  width: min(100vw, calc(100dvh * 16 / 9));
+  border: 0;
+  border-radius: 0;
+}
