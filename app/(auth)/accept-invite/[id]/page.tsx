@@ -1,27 +1,21 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import AcceptInvite from '@/components/auth/AcceptInvite'
-import { pool } from '@/lib/auth'
+import { backendFetch } from '@/lib/backend'
 import { getSession } from '@/lib/session'
 
 export const metadata: Metadata = { title: 'Join a workspace — MediaEX' }
 
-type Row = { id: string; email: string; role: string; status: string; expiresAt: Date; org: string; inviter: string }
+type Row = { id: string; email: string; role: string; status: string; expiresAt: string; org: string; inviter: string }
 
 export default async function AcceptInvitePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const { rows } = await pool
-    .query<Row>(
-      `select i.id, i.email, i.role, i.status, i."expiresAt", o.name as org, u.name as inviter
-         from "invitation" i
-         join "organization" o on o.id = i."organizationId"
-         join "user" u on u.id = i."inviterId"
-        where i.id = $1`,
-      [id],
-    )
-    .catch(() => ({ rows: [] as Row[] }))
-  const inv = rows[0]
-  const session = await getSession()
+  const [response, session] = await Promise.all([
+    backendFetch(`/api/mediaex/invitations/${encodeURIComponent(id)}`),
+    getSession(),
+  ])
+  if (!response.ok && response.status !== 404) throw new Error(`MediaEX API could not load the invitation (HTTP ${response.status}).`)
+  const inv: Row | null = response.ok ? await response.json() : null
   const here = `/accept-invite/${id}`
 
   if (!inv || inv.status !== 'pending' || new Date(inv.expiresAt) < new Date()) {

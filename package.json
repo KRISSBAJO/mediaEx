@@ -5,7 +5,11 @@
   "scripts": {
     "dev": "next dev -p 3400",
     "build": "next build",
-    "prestart": "npm run db:migrate",
+    "build:backend": "tsc -p backend/tsconfig.json",
+    "predev:backend": "npm run db:migrate",
+    "dev:backend": "node --env-file-if-exists=.env.local --experimental-strip-types --watch backend/server.mts",
+    "prestart:backend": "npm run db:migrate",
+    "start:backend": "node --env-file-if-exists=.env.local --experimental-strip-types backend/server.mts",
     "start": "next start -p 3400",
     "db:migrate": "node --env-file-if-exists=.env.local --experimental-strip-types --no-warnings scripts/migrate.mts"
   },

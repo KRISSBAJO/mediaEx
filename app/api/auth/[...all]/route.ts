@@ -1,4 +1,3 @@
-import { toNextJsHandler } from 'better-auth/next-js'
-import { auth } from '@/lib/auth'
+import { proxyAuth } from '@/lib/backend'
 
-export const { GET, POST, PATCH, PUT, DELETE } = toNextJsHandler(auth)
+export { proxyAuth as GET, proxyAuth as POST, proxyAuth as PATCH, proxyAuth as PUT, proxyAuth as DELETE }
