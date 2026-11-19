@@ -1,7 +1,7 @@
 /** Server-side access to media assets. Every query is scoped to a workspace. */
 import { randomBytes } from 'node:crypto'
-import { auth, pool } from '../../lib/auth.ts'
-import type { MediaAsset, MediaStatus, MediaType, Rendition } from '../../lib/media/types.ts'
+import { auth, pool } from '../auth.mts'
+import type { MediaAsset, MediaStatus, MediaType, Rendition } from './types.mts'
 
 export type AssetRow = {
   id: string

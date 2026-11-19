@@ -1,8 +1,7 @@
 /**
  * MediaEX authentication (Better Auth + Postgres).
  *
- * Keep this file free of relative and "@/" imports: scripts/migrate.mts loads it directly with Node to create the
- * database tables, and Node can't resolve the Next.js path aliases.
+ * The API and its database migration load this module directly with Node.
  */
 import { appendFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'

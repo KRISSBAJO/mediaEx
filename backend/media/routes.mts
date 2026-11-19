@@ -14,8 +14,8 @@
  *
  * The frontend forwards these paths unchanged (see app/api/{assets,uploads,media}).
  */
-import { pool } from '../../lib/auth.ts'
-import { guessType } from '../../lib/media/types.ts'
+import { pool } from '../auth.mts'
+import { guessType } from './types.mts'
 import { MAX_UPLOAD_BYTES, HttpError, getAssetRow, handle, isMemberOf, listAssets, newAssetId, prefixOf, requireMember, toDTO } from './assets.mts'
 import { isLocal, storage } from './storage.mts'
 import { kickWorker } from './worker.mts'

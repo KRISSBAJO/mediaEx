@@ -3,10 +3,8 @@
  * then the media tables (asset). Runs at backend startup and on demand with `npm run db:migrate`. Safe to repeat.
  */
 import { getMigrations } from 'better-auth/db/migration'
-// @ts-ignore -- Node runs this file directly and needs the explicit .ts extension
-import { auth, pool } from '../lib/auth.ts'
-// @ts-ignore -- same
-import { MEDIA_SCHEMA } from '../backend/media/schema.mts'
+import { auth, pool } from './auth.mts'
+import { MEDIA_SCHEMA } from './media/schema.mts'
 
 if (!process.env.DATABASE_URL) {
   console.error('[migrate] DATABASE_URL is not set.')

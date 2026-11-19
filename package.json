@@ -11,7 +11,7 @@
     "prestart:backend": "npm run db:migrate",
     "start:backend": "node --env-file-if-exists=.env.local --experimental-strip-types backend/server.mts",
     "start": "next start -p 3400",
-    "db:migrate": "node --env-file-if-exists=.env.local --experimental-strip-types --no-warnings scripts/migrate.mts"
+    "db:migrate": "node --env-file-if-exists=.env.local --experimental-strip-types --no-warnings backend/migrate.mts"
   },
   "dependencies": {
     "aws4fetch": "^1.0.20",

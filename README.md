@@ -32,14 +32,16 @@ Locally, media is stored under `./.media`.
 
 ## Deploying on Hoist
 
-Connect two web services to the same repository, branch and repository root. Use Node.js 22 for both.
+Connect two web services to the same repository and branch. Use the repository root for the frontend and `backend` for the API.
 
 | Service | Build command | Start command | Settings |
 |---|---|---|---|
 | Frontend | `npm run build` | `npm start` | Port 3400. Set `BACKEND_URL` to the backend HTTPS origin and `MEDIAEX_API_TOKEN` to the shared server-side secret. |
-| Backend | `npm run build:backend` | `npm run start:backend` | Set `PORT` to the assigned service port (default 3401). Set the backend variables below. **The backend image needs FFmpeg** (`ffmpeg` and `ffprobe`). |
+| Backend | Leave blank | Leave blank | Set the root directory to `backend`, the port to 3401 and the health check to `/readyz`. Hoist uses the backend Dockerfile. Set the backend variables below. |
 
-Set the same random `MEDIAEX_API_TOKEN` of at least 32 characters on both services. Keep it independent of the session signing secret. Use the backend's `/readyz` for database readiness and `/healthz` for process health. Backend startup runs the auth and media table migrations.
+Set the same random `MEDIAEX_API_TOKEN` of at least 32 characters on both services. Keep it independent of the session signing secret. The backend image type-checks the API during the build and contains its locked production dependencies at runtime. Startup runs the auth and media table migrations. Use `/healthz` for process health.
+
+The API image ships Node.js, the PostgreSQL-backed account service and the media API, plus FFmpeg (`ffmpeg` and `ffprobe`) for the media pipeline. Add new API dependencies to `backend/package.json` and its lockfile, put runtime files under `backend/`, and install any required system binaries in the Dockerfile's runtime stage. Include new database migrations in the backend startup migration.
 
 | Backend variable | Purpose |
 |---|---|
@@ -67,13 +69,13 @@ The backend logs which storage it uses at startup.
 
 ## How auth works
 
-- `lib/auth.ts` — Better Auth config: email + password, sessions in Postgres (30 days), password reset, email
+- `backend/auth.mts` — Better Auth config: email + password, sessions in Postgres (30 days), password reset, email
   verification, and the organization plugin, which provides **workspaces** (owner / admin / member), members and
   invitations. Every new account gets a personal workspace, unless it signed up to accept an invitation.
 - `app/api/auth/[...all]/route.ts` — forwards same-origin browser auth requests to `backend/server.mts`.
 - `proxy.ts` — fast redirect to `/sign-in` for `/dashboard/*` when there's no session cookie.
 - `backend/account.mts` — validates the session and loads the user’s workspaces and membership role for the dashboard. Better Auth enforces workspace permissions on the backend.
-- `scripts/migrate.mts` — creates or updates the tables (`npm run db:migrate`).
+- `backend/migrate.mts` — creates or updates the tables (`npm run db:migrate`).
 
 ## How media works
 
@@ -107,7 +109,7 @@ view analytics and signed playback URLs are not built yet.
 - `app/dashboard/`, `components/app/` — the dashboard shell and pages; `components/app/media.tsx` holds the asset list and upload queue, `MediaPlayer.tsx` the player
 - `app/embed/[id]` — the public player behind share links and iframes
 - `backend/server.mts` — the API service; `backend/media/` — media routes, storage (disk or S3), database access and the pipeline worker
-- `lib/media/types.ts` — media types shared by both services
+- `backend/media/types.mts` — media types shared by both services (the frontend imports them through `lib/media/types.ts`)
 - `lib/sample.ts` — sample analytics, API keys, webhooks and billing data (still to be replaced)
 - `app/globals.css`, `app/dashboard/dashboard.css` — design tokens and styles
 
