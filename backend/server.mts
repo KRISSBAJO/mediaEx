@@ -1,8 +1,12 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { Readable } from 'node:stream'
 import { fromNodeHeaders, toNodeHandler } from 'better-auth/node'
 import { auth, baseURL, enabledSocial, pool } from '../lib/auth.ts'
 import { getAccount, getInvitation } from './account.mts'
+import { handleMedia, isDurable } from './media/routes.mts'
+import { storage } from './media/storage.mts'
+import { startWorker } from './media/worker.mts'
 
 const frontend = new URL(baseURL)
 const serviceToken = process.env.MEDIAEX_API_TOKEN
@@ -20,6 +24,34 @@ const digest = (value: string) => createHash('sha256').update(value).digest()
 const expectedToken = serviceToken ? digest(serviceToken) : null
 const authHandler = toNodeHandler(auth)
 const readinessQuery = { text: 'select 1', query_timeout: 3000 }
+
+/** Media handlers are written against web Request/Response; bridge Node's request and response to them. */
+function toWebRequest(req: IncomingMessage, pathname: string) {
+  const method = req.method ?? 'GET'
+  const hasBody = method !== 'GET' && method !== 'HEAD'
+  return new Request(new URL(req.url ?? pathname, frontend), {
+    method,
+    headers: fromNodeHeaders(req.headers),
+    body: hasBody ? (Readable.toWeb(req) as ReadableStream) : undefined,
+    duplex: hasBody ? 'half' : undefined,
+  } as RequestInit)
+}
+
+async function sendWeb(res: ServerResponse, response: Response) {
+  const headers: Record<string, string> = {}
+  response.headers.forEach((value, name) => (headers[name] = value))
+  res.writeHead(response.status, headers)
+  if (!response.body) return void res.end()
+  await new Promise<void>((resolve, reject) => {
+    const body = Readable.fromWeb(response.body as never)
+    body.on('error', reject)
+    res.on('close', () => {
+      body.destroy()
+      resolve()
+    })
+    body.pipe(res)
+  })
+}
 
 function json(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
@@ -53,6 +85,10 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   req.headers['x-forwarded-proto'] = frontend.protocol.slice(0, -1)
   res.setHeader('cache-control', 'no-store')
   if (pathname.startsWith('/api/auth/')) return await authHandler(req, res)
+  if (/^\/api\/(assets|uploads|media)(\/|$)/.test(pathname)) {
+    const response = await handleMedia(toWebRequest(req, pathname), pathname)
+    if (response) return await sendWeb(res, response)
+  }
   if (!read) return json(res, 405, { error: 'Method not allowed' })
   if (pathname === '/api/mediaex/providers') return json(res, 200, enabledSocial)
   if (pathname === '/api/mediaex/account') {
@@ -77,7 +113,13 @@ const server = createServer((req, res) => {
     else res.destroy()
   })
 })
-server.listen(port, '0.0.0.0', () => console.log(`MediaEX backend listening on port ${port}`))
+server.listen(port, '0.0.0.0', () => {
+  console.log(`MediaEX backend listening on port ${port}`)
+  const kind = storage().kind
+  console.log(`MediaEX media storage: ${kind === 's3' ? 'S3-compatible bucket' : 'local disk'}${isDurable() ? '' : ' (not durable: set S3_* or mount MEDIA_DIR)'}`)
+  // the media pipeline worker shares this process; MEDIA_WORKER=off runs an API-only instance
+  if (process.env.MEDIA_WORKER !== 'off') startWorker()
+})
 function shutdown() {
   server.close(() => { void pool.end() })
 }

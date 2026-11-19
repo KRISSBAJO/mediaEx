@@ -1,59 +1,36 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useRef, useState } from 'react'
-import { ASSETS, PIPELINE, bytes } from '@/lib/sample'
+import { useRef, useState } from 'react'
+import { ACCEPT_ATTR, STAGES, guessType, isActive } from '@/lib/media/types'
+import { bytes } from '@/lib/sample'
 import Icon from '../Icon'
-import { Card, PageHead, StatusBadge, Thumb, copyText, toast } from '../ui'
+import { useMedia, type Transfer } from '../media'
+import { Card, PageHead, StatusBadge, Thumb } from '../ui'
 
-type Item = { id: string; name: string; size: number; kind: 'video' | 'audio' | 'image'; up: number; stage: number; done: boolean }
-
-const kindOf = (f: File): Item['kind'] => (f.type.startsWith('audio') ? 'audio' : f.type.startsWith('image') ? 'image' : 'video')
+function transferLine(t: Transfer, assetStatus?: string, stage?: number, progress?: number) {
+  if (t.state === 'waiting') return 'Waiting to upload'
+  if (t.state === 'uploading') return `Uploading · ${bytes(t.loaded)} of ${bytes(t.size)}`
+  if (t.state === 'error') return t.error ?? 'Upload failed'
+  if (t.state === 'cancelled') return 'Cancelled'
+  if (assetStatus === 'ready') return 'Ready to stream'
+  if (assetStatus === 'failed') return 'Processing failed'
+  if (assetStatus === 'queued') return 'Uploaded · waiting for an encoder'
+  if (assetStatus === 'processing') return `${STAGES[stage ?? 1]} · ${Math.round(progress ?? 0)}%`
+  return 'Uploaded'
+}
 
 export default function Uploads() {
-  const [items, setItems] = useState<Item[]>([])
+  const { assets, transfers, upload, cancel, clearFinished, get } = useMedia()
   const [drag, setDrag] = useState(false)
-  const [preset, setPreset] = useState('auto')
-  const [captions, setCaptions] = useState(true)
-  const [signed, setSigned] = useState(false)
-  const [url, setUrl] = useState('')
   const input = useRef<HTMLInputElement>(null)
-  const inPipeline = ASSETS.filter((a) => a.status === 'processing' || a.status === 'queued')
-
-  const add = (files: FileList | null) => {
-    if (!files?.length) return
-    const next = Array.from(files).map((f, i) => ({
-      id: `${Date.now()}-${i}`,
-      name: f.name,
-      size: f.size,
-      kind: kindOf(f),
-      up: 0,
-      stage: -1,
-      done: false,
-    }))
-    setItems((xs) => [...next, ...xs])
-    toast(`${next.length} file${next.length > 1 ? 's' : ''} added — preview only, nothing leaves your device`)
-  }
-
-  // simulate transfer, then the pipeline stages
-  useEffect(() => {
-    if (!items.some((x) => !x.done)) return
-    const id = setInterval(() => {
-      setItems((xs) =>
-        xs.map((x) => {
-          if (x.done) return x
-          if (x.up < 100) return { ...x, up: Math.min(100, x.up + 4 + Math.random() * 9) }
-          if (x.stage < PIPELINE.length - 1) return { ...x, stage: x.stage + 1 }
-          return { ...x, done: true }
-        }),
-      )
-    }, 450)
-    return () => clearInterval(id)
-  }, [items])
+  const sessionIds = new Set(transfers.map((t) => t.assetId))
+  const inPipeline = assets.filter((a) => isActive(a) && !sessionIds.has(a.id))
+  const finished = transfers.some((t) => t.state !== 'uploading' && t.state !== 'waiting')
 
   return (
     <>
-      <PageHead title="Uploads" sub="Drop files to ingest them. MediaEX encodes, captions and packages each one automatically." />
+      <PageHead title="Uploads" sub="Drop files to ingest them. MediaEX analyses, encodes and packages each one for streaming." />
 
       <div className="grid-2">
         <div className="stack">
@@ -67,146 +44,152 @@ export default function Uploads() {
             onDrop={(e) => {
               e.preventDefault()
               setDrag(false)
-              add(e.dataTransfer.files)
+              upload(e.dataTransfer.files)
             }}
           >
             <span className="vf-corner tl" aria-hidden="true" />
             <span className="vf-corner tr" aria-hidden="true" />
             <span className="vf-corner bl" aria-hidden="true" />
             <span className="vf-corner br" aria-hidden="true" />
-            <input ref={input} type="file" multiple accept="video/*,audio/*,image/*,.mov,.mxf,.braw,.r3d" className="sr-only" onChange={(e) => add(e.target.files)} />
+            <input
+              ref={input}
+              type="file"
+              multiple
+              accept={ACCEPT_ATTR}
+              className="sr-only"
+              onChange={(e) => {
+                if (e.target.files) upload(e.target.files)
+                e.target.value = ''
+              }}
+            />
             <span className="drop-icon">
               <Icon name="upload" size={22} />
             </span>
             <b>{drag ? 'Drop to upload' : 'Drag files here, or browse'}</b>
-            <p>Video, audio and images up to 5 TB each. ProRes, RAW, MXF, WAV, FLAC, HEIC and more.</p>
+            <p>Video, audio and images up to 5 GB each — MP4, MOV, MKV, WebM, MXF, WAV, MP3, FLAC, JPEG, PNG and more.</p>
             <span className="btn btn-ghost btn-sm">Browse files</span>
           </label>
 
-          {items.length > 0 && (
-            <Card title="This session" meta={`${items.filter((x) => x.done).length} of ${items.length} ready`} flush>
+          {transfers.length > 0 && (
+            <Card
+              title="This session"
+              meta={`${transfers.filter((t) => t.state === 'done' && get(t.assetId ?? '')?.status === 'ready').length} of ${transfers.length} ready`}
+              flush
+              action={
+                finished ? (
+                  <button type="button" className="btn btn-quiet btn-sm" onClick={clearFinished}>
+                    Clear finished
+                  </button>
+                ) : undefined
+              }
+            >
               <ul className="rows">
-                {items.map((x) => (
-                  <li key={x.id}>
-                    <span className="file-kind">
-                      <Icon name={x.kind} size={16} />
-                    </span>
-                    <div className="grow">
-                      <b>{x.name}</b>
-                      <small>
-                        {bytes(x.size)} · {x.done ? 'Ready to stream' : x.up < 100 ? `Uploading ${Math.round(x.up)}%` : `${PIPELINE[x.stage] ?? 'Starting'}…`}
-                      </small>
-                      <span className="meter">
-                        <i style={{ width: `${x.done ? 100 : x.up < 100 ? x.up * 0.5 : 50 + ((x.stage + 1) / PIPELINE.length) * 50}%` }} />
+                {transfers.map((t) => {
+                  const a = t.assetId ? get(t.assetId) : undefined
+                  const kind = guessType(t.name) ?? 'file'
+                  const sending = t.state === 'uploading' || t.state === 'waiting'
+                  const pct = sending ? (t.loaded / Math.max(1, t.size)) * 100 : a?.status === 'ready' ? 100 : a?.status === 'processing' ? a.progress : 0
+                  const live = sending || (!!a && isActive(a))
+                  return (
+                    <li key={t.key}>
+                      {a?.thumbUrl ? (
+                        <Thumb asset={a} className="row-thumb" />
+                      ) : (
+                        <span className="file-kind">
+                          <Icon name={kind} size={16} />
+                        </span>
+                      )}
+                      <div className="grow">
+                        {a && t.state === 'done' ? (
+                          <Link href={`/dashboard/library/${a.id}`} className="row-link">
+                            <b>{a.title}</b>
+                          </Link>
+                        ) : (
+                          <b>{t.name}</b>
+                        )}
+                        <small className={t.state === 'error' ? 'is-bad' : ''}>
+                          {bytes(t.size)} · {transferLine(t, a?.status, a?.stage, a?.progress)}
+                        </small>
+                        {live && (
+                          <span className={`meter ${sending ? 'is-upload' : ''}`}>
+                            <i style={{ width: `${pct}%` }} />
+                          </span>
+                        )}
+                      </div>
+                      {sending ? (
+                        <button type="button" className="btn btn-quiet btn-sm" onClick={() => cancel(t.key)}>
+                          Cancel
+                        </button>
+                      ) : t.state === 'error' ? (
+                        <StatusBadge status="failed" />
+                      ) : a ? (
+                        <StatusBadge status={a.status} progress={a.progress} />
+                      ) : null}
+                    </li>
+                  )
+                })}
+              </ul>
+            </Card>
+          )}
+
+          {inPipeline.length > 0 && (
+            <Card
+              title="Already in the pipeline"
+              meta={`${inPipeline.length} ${inPipeline.length === 1 ? 'asset' : 'assets'}`}
+              flush
+              action={
+                <Link href="/dashboard/library" className="panel-link">
+                  Library <Icon name="arrowRight" size={14} />
+                </Link>
+              }
+            >
+              <ul className="rows">
+                {inPipeline.map((a) => (
+                  <li key={a.id}>
+                    <Link href={`/dashboard/library/${a.id}`} className="asset-cell">
+                      <Thumb asset={a} />
+                      <span>
+                        <b>{a.title}</b>
+                        <small>
+                          {bytes(a.size)} · {a.status === 'queued' ? 'Waiting for an encoder' : a.status === 'uploading' ? 'Uploading' : `${STAGES[a.stage]}…`}
+                        </small>
                       </span>
-                    </div>
-                    {x.done ? <StatusBadge status="ready" /> : <StatusBadge status="processing" />}
+                    </Link>
+                    <StatusBadge status={a.status} progress={a.progress} />
                   </li>
                 ))}
               </ul>
             </Card>
           )}
-
-          <Card
-            title="Already in the pipeline"
-            meta={`${inPipeline.length} assets`}
-            flush
-            action={
-              <Link href="/dashboard/library" className="panel-link">
-                Library <Icon name="arrowRight" size={14} />
-              </Link>
-            }
-          >
-            <ul className="rows">
-              {inPipeline.map((a) => (
-                <li key={a.id}>
-                  <Link href={`/dashboard/library/${a.id}`} className="asset-cell">
-                    <Thumb asset={a} />
-                    <span>
-                      <b>{a.title}</b>
-                      <small>
-                        {bytes(a.size)} · {a.status === 'queued' ? 'Waiting for an encoder' : `${PIPELINE[Math.floor((a.progress / 100) * PIPELINE.length)]}…`}
-                      </small>
-                    </span>
-                  </Link>
-                  <StatusBadge status={a.status} progress={a.progress} />
-                </li>
-              ))}
-            </ul>
-          </Card>
         </div>
 
         <div className="stack">
-          <Card
-            title="Defaults for new uploads"
-            hint="Applies to files you add next"
-            footer={
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => toast('Upload defaults saved for this session')}>
-                Save defaults
-              </button>
-            }
-          >
-            <div className="form-stack">
-              <label className="field-d">
-                <span>Encoding ladder</span>
-                <select className="select" value={preset} onChange={(e) => setPreset(e.target.value)}>
-                  <option value="auto">Per-title (recommended)</option>
-                  <option value="4k">Fixed: 2160p → 360p</option>
-                  <option value="hd">Fixed: 1080p → 360p</option>
-                  <option value="social">Social: vertical 1080×1920</option>
-                </select>
-                <small>{preset === 'auto' ? 'Analyses each asset and picks the smallest ladder that keeps quality.' : 'Every asset gets the same renditions.'}</small>
-              </label>
-              <label className="check">
-                <input type="checkbox" checked={captions} onChange={(e) => setCaptions(e.target.checked)} />
-                <span>
-                  Auto captions
-                  <small>English, then translated to Spanish and Japanese.</small>
-                </span>
-              </label>
-              <label className="check">
-                <input type="checkbox" checked={signed} onChange={(e) => setSigned(e.target.checked)} />
-                <span>
-                  Require signed URLs
-                  <small>Playback needs a token from your server.</small>
-                </span>
-              </label>
-            </div>
+          <Card title="What happens to each file">
+            <ol className="steps-list">
+              <li>
+                <b>Upload</b>
+                <span>The original is stored as-is. Only members of this workspace can download it.</span>
+              </li>
+              <li>
+                <b>Analyse</b>
+                <span>We read the codec, resolution, frame rate and length, and grab a thumbnail — a frame, or a waveform for audio.</span>
+              </li>
+              <li>
+                <b>Encode</b>
+                <span>Video becomes an H.264 adaptive ladder from 1080p down to 360p, never above the source. Audio becomes AAC. Images get a web-sized poster.</span>
+              </li>
+              <li>
+                <b>Package</b>
+                <span>Everything is packaged as HLS, so it streams on the web, iOS, Android and TVs from one link.</span>
+              </li>
+            </ol>
           </Card>
-
-          <Card title="Import from a URL">
-            <form
-              className="inline-form"
-              onSubmit={(e) => {
-                e.preventDefault()
-                if (!/^https?:\/\/\S+\.\S+/.test(url.trim())) return toast('Enter a full http(s) URL to import')
-                toast('URL imports need the backend — nothing was fetched')
-                setUrl('')
-              }}
-            >
-              <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://… or s3://bucket/key" aria-label="Media URL" />
-              <button type="submit" className="btn btn-ghost">
-                Import
-              </button>
-            </form>
-          </Card>
-
-          <Card
-            title="From the command line"
-            action={
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText('npm i -g @mediaex/cli && mx upload ./footage --watch', 'Command copied')}>
-                <Icon name="copy" size={15} /> Copy
-              </button>
-            }
-          >
-            <pre className="snippet">
-              <code>
-                <span className="cm"># install once</span>
-                {'\n'}npm i -g @mediaex/cli{'\n\n'}
-                <span className="cm"># upload a folder, keep watching it</span>
-                {'\n'}mx upload ./footage --watch
-              </code>
-            </pre>
+          <Card title="Good to know">
+            <ul className="facts">
+              <li>Uploads keep going while you move around the dashboard. Closing the tab stops them.</li>
+              <li>Two files upload at a time; the rest wait their turn.</li>
+              <li>Processing usually takes less time than the video lasts.</li>
+            </ul>
           </Card>
         </div>
       </div>

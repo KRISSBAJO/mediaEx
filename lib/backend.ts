@@ -79,3 +79,41 @@ export async function proxyAuth(request: Request) {
     })
   }
 }
+
+/**
+ * Forwards the media API (/api/assets, /api/uploads, /api/media) to the backend, streaming both ways so large uploads
+ * and video segments never sit in memory. Redirects (presigned bucket URLs) pass through to the browser.
+ */
+export async function proxyMedia(request: Request) {
+  const incoming = new URL(request.url)
+  if (!/^\/api\/(assets|uploads|media)(\/|$)/.test(incoming.pathname)) return new Response(null, { status: 404 })
+
+  const headers = new Headers()
+  for (const name of ['accept', 'content-type', 'content-length', 'range', 'if-none-match', 'if-modified-since', 'origin', 'referer', 'user-agent']) {
+    const value = request.headers.get(name)
+    if (value !== null) headers.set(name, value)
+  }
+  const cookie = authCookies(request.headers)
+  if (cookie) headers.set('cookie', cookie)
+  const hasBody = request.method !== 'GET' && request.method !== 'HEAD'
+
+  try {
+    const response = await backendFetch(incoming.pathname + incoming.search, {
+      method: request.method, headers, body: hasBody ? request.body : undefined, duplex: hasBody ? 'half' : undefined, signal: request.signal,
+    })
+    const outgoing = new Headers()
+    for (const name of [
+      'content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control', 'content-disposition',
+      'location', 'etag', 'last-modified', 'access-control-allow-origin',
+    ]) {
+      const value = response.headers.get(name)
+      if (value !== null) outgoing.set(name, value)
+    }
+    if (!outgoing.has('cache-control')) outgoing.set('cache-control', 'private, no-store')
+    return new Response(request.method === 'HEAD' ? null : response.body, { status: response.status, headers: outgoing })
+  } catch {
+    return Response.json({ error: 'MediaEX media is temporarily unavailable. Try again in a moment.' }, {
+      status: 503, headers: { 'cache-control': 'private, no-store' },
+    })
+  }
+}

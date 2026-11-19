@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import Shell from '@/components/app/Shell'
-import { requireAccount } from '@/lib/session'
+import { getWorkspaceAssets, requireAccount } from '@/lib/session'
 import './dashboard.css'
 
 export const metadata: Metadata = {
@@ -9,6 +9,12 @@ export const metadata: Metadata = {
 }
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  // account first: it settles the active workspace that the asset list is scoped to
   const account = await requireAccount()
-  return <Shell account={account}>{children}</Shell>
+  const initialAssets = await getWorkspaceAssets()
+  return (
+    <Shell account={account} initialAssets={initialAssets}>
+      {children}
+    </Shell>
+  )
 }

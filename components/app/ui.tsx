@@ -1,70 +1,47 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import type { Asset, AssetStatus, Point, Range } from '@/lib/sample'
+import type { MediaAsset, MediaStatus, MediaType } from '@/lib/media/types'
+import type { Point, Range } from '@/lib/sample'
 import { duration as fmtDuration } from '@/lib/sample'
 import Icon from './Icon'
 
-/* ------------------------------------------------ thumbnails (generated, monochrome "film stills") */
-const VIDEO_LOOKS = [
-  // dusk horizon
-  'radial-gradient(circle at 50% 58%, #e8e6e1 0 7%, rgba(232,230,225,.35) 8%, transparent 26%), linear-gradient(180deg, #4b4a46 0%, #2a2926 55%, #121211 56%, #0c0c0b 100%)',
-  // stage light cone
-  'conic-gradient(from 160deg at 50% -10%, transparent 0 12deg, rgba(242,241,238,.28) 18deg 26deg, transparent 32deg), radial-gradient(ellipse at 50% 100%, #3b3a37, #121211 70%)',
-  // window light streak
-  'linear-gradient(115deg, transparent 38%, rgba(242,241,238,.22) 40% 47%, transparent 49% 55%, rgba(242,241,238,.12) 57% 60%, transparent 62%), linear-gradient(180deg, #2e2d2a, #141413)',
-  // portrait
-  'radial-gradient(circle at 50% 44%, #8c8b87 0 13%, transparent 13.5%), radial-gradient(ellipse at 50% 112%, #6f6e6a 0 34%, transparent 34.5%), radial-gradient(circle at 30% 20%, #3a3936, #161615 70%)',
-  // city grid at night
-  'repeating-linear-gradient(90deg, rgba(255,255,255,.05) 0 2px, transparent 2px 14px), linear-gradient(0deg, #0e0e0d 0 30%, transparent 30%), linear-gradient(180deg, #3a3936, #1a1a19)',
-]
-
-export function Thumb({ asset, className = '' }: { asset: Pick<Asset, 'type' | 'thumb' | 'duration' | 'status'>; className?: string }) {
-  const { type, thumb } = asset
+/* ------------------------------------------------ thumbnails: the real frame (or waveform) once the pipeline made one */
+export function Thumb({ asset, className = '' }: { asset: Pick<MediaAsset, 'type' | 'thumbUrl' | 'duration'>; className?: string }) {
   return (
-    <div className={`thumb thumb-${type} ${className}`} style={type === 'video' ? { background: VIDEO_LOOKS[thumb % VIDEO_LOOKS.length] } : undefined}>
-      {type === 'audio' && (
-        <svg viewBox="0 0 120 40" preserveAspectRatio="none" aria-hidden="true">
-          {Array.from({ length: 40 }, (_, i) => {
-            // rounded so server and browser maths produce identical markup
-            const h = Math.round((6 + Math.abs(Math.sin(i * 0.7 + thumb) * Math.cos(i * 0.23 + thumb * 2)) * 30) * 10) / 10
-            return <rect key={i} x={i * 3 + 0.5} y={Math.round((20 - h / 2) * 100) / 100} width="1.6" height={h} rx="0.8" />
-          })}
-        </svg>
+    <div className={`thumb thumb-${asset.type} ${asset.thumbUrl ? 'has-img' : 'is-empty'} ${className}`}>
+      {asset.thumbUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element -- served by our own media route, already sized
+        <img src={asset.thumbUrl} alt="" loading="lazy" decoding="async" />
+      ) : (
+        <Icon name={asset.type} size={18} />
       )}
-      {type === 'image' && (
-        <div className="thumb-mosaic" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-          <i />
-        </div>
-      )}
-      {asset.duration > 0 && <span className="thumb-dur">{fmtDuration(asset.duration)}</span>}
+      {asset.duration > 0 && <span className="thumb-dur">{fmtDuration(Math.round(asset.duration))}</span>}
     </div>
   )
 }
 
 /* ------------------------------------------------ status: colour + icon + label, never colour alone */
-const STATUS: Record<AssetStatus, { label: string; icon: string }> = {
-  ready: { label: 'Ready', icon: 'check' },
-  processing: { label: 'Processing', icon: 'refresh' },
+const STATUS: Record<MediaStatus, { label: string; icon: string }> = {
+  uploading: { label: 'Uploading', icon: 'upload' },
   queued: { label: 'Queued', icon: 'clock' },
+  processing: { label: 'Processing', icon: 'refresh' },
+  ready: { label: 'Ready', icon: 'check' },
   failed: { label: 'Failed', icon: 'alert' },
 }
 
-export function StatusBadge({ status, progress }: { status: AssetStatus; progress?: number }) {
+export function StatusBadge({ status, progress }: { status: MediaStatus; progress?: number }) {
   const s = STATUS[status]
   return (
     <span className={`status status-${status}`}>
       <Icon name={s.icon} size={13} />
       {s.label}
-      {status === 'processing' && progress ? <em>{progress}%</em> : null}
+      {status === 'processing' && progress ? <em>{Math.round(progress)}%</em> : null}
     </span>
   )
 }
 
-export function TypeIcon({ type }: { type: Asset['type'] }) {
+export function TypeIcon({ type }: { type: MediaType }) {
   return <Icon name={type} size={15} className="type-icon" />
 }
 

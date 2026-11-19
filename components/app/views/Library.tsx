@@ -2,34 +2,62 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
-import { ASSETS, bytes, compact, relDay, type AssetType } from '@/lib/sample'
+import { isActive, type MediaAsset, type MediaType } from '@/lib/media/types'
+import { bytes, duration as fmtDuration } from '@/lib/sample'
 import Icon from '../Icon'
+import { Ago, dims, useMedia } from '../media'
 import { Card, PageHead, StatusBadge, Tabs, Thumb, TypeIcon } from '../ui'
 
-type Filter = 'all' | AssetType | 'attention'
-type Sort = 'new' | 'views' | 'name' | 'size'
+type Filter = 'all' | MediaType | 'attention'
+type Sort = 'new' | 'name' | 'size' | 'long'
+
+const matches = (f: Filter) => (a: MediaAsset) => (f === 'all' ? true : f === 'attention' ? a.status !== 'ready' : a.type === f)
 
 export default function Library() {
+  const { assets } = useMedia()
   const [filter, setFilter] = useState<Filter>('all')
   const [q, setQ] = useState('')
   const [sort, setSort] = useState<Sort>('new')
   const [view, setView] = useState<'grid' | 'list'>('grid')
 
-  const count = (f: Filter) =>
-    ASSETS.filter((a) => (f === 'all' ? true : f === 'attention' ? a.status !== 'ready' : a.type === f)).length
+  const count = (f: Filter) => assets.filter(matches(f)).length
+  const stored = assets.reduce((t, a) => t + a.size + a.outputSize, 0)
 
   const list = useMemo(() => {
     const s = q.trim().toLowerCase()
-    return ASSETS.filter((a) => (filter === 'all' ? true : filter === 'attention' ? a.status !== 'ready' : a.type === filter))
-      .filter((a) => !s || a.title.toLowerCase().includes(s) || a.tags.some((t) => t.includes(s)))
+    return assets
+      .filter(matches(filter))
+      .filter((a) => !s || a.title.toLowerCase().includes(s) || a.fileName.toLowerCase().includes(s) || a.tags.some((t) => t.includes(s)))
       .sort((a, b) =>
-        sort === 'views' ? b.views - a.views : sort === 'name' ? a.title.localeCompare(b.title) : sort === 'size' ? b.size - a.size : a.createdDaysAgo - b.createdDaysAgo,
+        sort === 'name' ? a.title.localeCompare(b.title) : sort === 'size' ? b.size - a.size : sort === 'long' ? b.duration - a.duration : b.createdAt.localeCompare(a.createdAt),
       )
-  }, [filter, q, sort])
+  }, [assets, filter, q, sort])
+
+  if (!assets.length) {
+    return (
+      <>
+        <PageHead title="Library" sub="Everything you upload lands here, ready to stream." />
+        <Card>
+          <div className="empty">
+            <Icon name="library" size={22} />
+            <b>Your library is empty</b>
+            <p>Upload a video, audio file or image. MediaEX encodes it for streaming and it appears here.</p>
+            <Link href="/dashboard/uploads" className="btn btn-primary btn-sm">
+              <Icon name="upload" size={15} /> Upload files
+            </Link>
+          </div>
+        </Card>
+      </>
+    )
+  }
 
   return (
     <>
-      <PageHead title="Library" sub={`${ASSETS.length} assets · ${bytes(ASSETS.reduce((s, a) => s + a.size, 0))} stored`} />
+      <PageHead title="Library" sub={`${assets.length} ${assets.length === 1 ? 'asset' : 'assets'} · ${bytes(stored)} stored`}>
+        <Link href="/dashboard/uploads" className="btn btn-primary btn-sm">
+          <Icon name="upload" size={15} /> Upload
+        </Link>
+      </PageHead>
 
       <Tabs
         value={filter}
@@ -39,7 +67,7 @@ export default function Library() {
           { value: 'video', label: 'Video', count: count('video') },
           { value: 'audio', label: 'Audio', count: count('audio') },
           { value: 'image', label: 'Images', count: count('image') },
-          { value: 'attention', label: 'Needs attention', count: count('attention') },
+          { value: 'attention', label: 'In progress & failed', count: count('attention') },
         ]}
       />
 
@@ -47,15 +75,15 @@ export default function Library() {
         <label className="input-icon grow">
           <Icon name="search" size={16} />
           <span className="sr-only">Search assets</span>
-          <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by title or tag" />
+          <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by title, file name or tag" />
         </label>
         <label>
           <span className="sr-only">Sort by</span>
           <select className="select" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
             <option value="new">Newest first</option>
-            <option value="views">Most viewed</option>
             <option value="name">Name A–Z</option>
             <option value="size">Largest first</option>
+            <option value="long">Longest first</option>
           </select>
         </label>
         <div className="seg seg-icon" role="group" aria-label="Layout">
@@ -72,7 +100,7 @@ export default function Library() {
         <Card>
           <div className="empty">
             <Icon name="search" size={22} />
-            <b>No assets match “{q}”</b>
+            <b>{q ? `No assets match “${q}”` : 'Nothing here yet'}</b>
             <p>Try another title or tag, or clear the filter.</p>
             <button
               type="button"
@@ -82,7 +110,7 @@ export default function Library() {
                 setFilter('all')
               }}
             >
-              Clear search
+              Show everything
             </button>
           </div>
         </Card>
@@ -96,9 +124,15 @@ export default function Library() {
                 <div className="asset-card-meta">
                   <span>
                     <TypeIcon type={a.type} />
-                    {a.views ? `${compact(a.views)} views` : bytes(a.size)}
+                    {a.type === 'image' ? dims(a) : fmtDuration(Math.round(a.duration))}
                   </span>
-                  {a.status === 'ready' ? <span className="muted">{relDay(a.createdDaysAgo)}</span> : <StatusBadge status={a.status} progress={a.progress} />}
+                  {a.status === 'ready' ? (
+                    <span className="muted">
+                      <Ago iso={a.createdAt} />
+                    </span>
+                  ) : (
+                    <StatusBadge status={a.status} progress={a.progress} />
+                  )}
                 </div>
               </div>
             </Link>
@@ -112,9 +146,8 @@ export default function Library() {
                 <tr>
                   <th>Asset</th>
                   <th>Status</th>
+                  <th className="num">Duration</th>
                   <th className="num">Size</th>
-                  <th className="num">Views</th>
-                  <th className="num">Watch time</th>
                   <th className="num">Added</th>
                 </tr>
               </thead>
@@ -128,18 +161,19 @@ export default function Library() {
                           <b>{a.title}</b>
                           <small>
                             <TypeIcon type={a.type} />
-                            {a.resolution}
+                            {a.sourceInfo ?? a.fileName}
                           </small>
                         </span>
                       </Link>
                     </td>
                     <td>
-                      <StatusBadge status={a.status} progress={a.progress} />
+                      <StatusBadge status={a.status} progress={isActive(a) ? a.progress : undefined} />
                     </td>
-                    <td className="num mono">{bytes(a.size)}</td>
-                    <td className="num">{a.views ? a.views.toLocaleString('en-US') : '—'}</td>
-                    <td className="num">{a.watchHours ? `${a.watchHours.toLocaleString('en-US')} h` : '—'}</td>
-                    <td className="num muted">{relDay(a.createdDaysAgo)}</td>
+                    <td className="num">{a.duration ? fmtDuration(Math.round(a.duration)) : '—'}</td>
+                    <td className="num">{bytes(a.size)}</td>
+                    <td className="num muted">
+                      <Ago iso={a.createdAt} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
