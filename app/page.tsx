@@ -2,7 +2,8 @@ import HeroScene from '@/components/HeroScene'
 import WaveTerrain from '@/components/WaveTerrain'
 import Nav from '@/components/Nav'
 import MotionRoot from '@/components/MotionRoot'
-import Pricing from '@/components/Pricing'
+import PriceDial from '@/components/PriceDial'
+import Closing from '@/components/Closing'
 import Footer from '@/components/Footer'
 import Timecode from '@/components/Timecode'
 import Pipeline from '@/components/Pipeline'
@@ -266,50 +267,22 @@ export default function Home() {
           <SectionHead
             index="05"
             label="Pricing"
-            note="Player, API and delivery on every plan"
+            note="Drag to size your library"
             title={
               <>
                 Start free. <span className="grad-text">Scale when you&apos;re ready.</span>
               </>
             }
           >
-            No egress surprises. Every plan includes the player, the API and global delivery.
+            One price that follows your library. Every plan includes the player, the API and global delivery. No egress surprises.
           </SectionHead>
-          <Pricing />
-        </section>
-
-        {/* ---------------- CTA ---------------- */}
-        <section className="section cta-wrap">
-          <div className="cta" data-reveal>
-            <span className="vf-corner tl" aria-hidden="true" />
-            <span className="vf-corner tr" aria-hidden="true" />
-            <span className="vf-corner bl" aria-hidden="true" />
-            <span className="vf-corner br" aria-hidden="true" />
-            <div className="vf-meta top" aria-hidden="true">
-              <span className="vf-live">
-                <i />
-                Rolling
-              </span>
-              <span>Take 01</span>
-            </div>
-            <h2>
-              Your next release
-              <br />
-              <span className="grad-text">starts with one upload.</span>
-            </h2>
-            <div className="cta-side">
-              <p>Free forever plan. No card required. Bring your first 100 GB today.</p>
-              <div className="hero-actions">
-                <a href="/sign-up" className="btn btn-primary btn-lg">
-                  Start free <Arrow />
-                </a>
-                <a href="#pricing" className="link-arrow">
-                  Book a demo <Arrow />
-                </a>
-              </div>
-            </div>
+          <div data-reveal>
+            <PriceDial />
           </div>
         </section>
+
+        {/* ---------------- CLOSING ---------------- */}
+        <Closing />
       </main>
 
       <Footer />

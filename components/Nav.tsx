@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { authClient } from '@/lib/auth-client'
 import Logo from './Logo'
@@ -10,11 +11,17 @@ const LINKS = [
   { id: 'engine', label: 'Engine' },
   { id: 'workflow', label: 'Workflow' },
   { id: 'developers', label: 'Developers' },
-  { id: 'pricing', label: 'Pricing' },
+  { id: 'pricing', label: 'Pricing', page: '/pricing' },
 ]
+
+/** on the landing page the links scroll to sections; elsewhere they go back to them. Pricing has its own page. */
+const hrefFor = (l: (typeof LINKS)[number], home: boolean) => ('page' in l && l.page ? l.page : `${home ? '' : '/'}#${l.id}`)
 
 export default function Nav() {
   const { data: session } = authClient.useSession()
+  const path = usePathname()
+  const home = path === '/'
+  const onPage = LINKS.find((l) => 'page' in l && l.page === path)?.id ?? null
   const [scrolled, setScrolled] = useState(false)
   const [hidden, setHidden] = useState(false)
   const [open, setOpen] = useState(false)
@@ -73,6 +80,7 @@ export default function Nav() {
 
   // which section is in the middle of the screen
   useEffect(() => {
+    if (!home) return setActive(onPage)
     const sections = LINKS.map((l) => document.getElementById(l.id)).filter(Boolean) as HTMLElement[]
     const io = new IntersectionObserver(
       (entries) => {
@@ -91,7 +99,7 @@ export default function Nav() {
       io.disconnect()
       window.removeEventListener('scroll', onTop)
     }
-  }, [])
+  }, [home, onPage])
 
   // slide the underline to the active link
   useEffect(() => {
@@ -126,7 +134,7 @@ export default function Nav() {
   return (
     <header ref={headerRef} className={cls}>
       <div className="nav-inner">
-        <a href="#top" className="brand" aria-label="MediaEX home" onClick={() => setOpen(false)}>
+        <a href={home ? '#top' : '/'} className="brand" aria-label="MediaEX home" onClick={() => setOpen(false)}>
           <Logo size={26} />
           <span>
             Media<b>EX</b>
@@ -135,7 +143,7 @@ export default function Nav() {
 
         <nav ref={linksRef} className="nav-links" aria-label="Main">
           {LINKS.map((l, i) => (
-            <a key={l.id} href={`#${l.id}`} data-id={l.id} onClick={pin} className={active === l.id ? 'is-active' : ''} aria-current={active === l.id ? 'true' : undefined}>
+            <a key={l.id} href={hrefFor(l, home)} data-id={l.id} onClick={pin} className={active === l.id ? 'is-active' : ''} aria-current={active === l.id ? 'true' : undefined}>
               <b>0{i + 1}</b>
               {l.label}
             </a>
@@ -176,7 +184,7 @@ export default function Nav() {
       <div id="nav-sheet" className="nav-sheet" aria-hidden={!open}>
         <nav aria-label="Mobile">
           {LINKS.map((l, i) => (
-            <a key={l.id} href={`#${l.id}`} tabIndex={open ? 0 : -1}
+            <a key={l.id} href={hrefFor(l, home)} tabIndex={open ? 0 : -1}
               onClick={() => {
                 setOpen(false)
                 pin()
