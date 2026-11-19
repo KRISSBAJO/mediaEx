@@ -20,13 +20,13 @@ function Arrow() {
 export default function Home() {
   return (
     <>
-      <HeroScene />
       <MotionRoot />
       <Nav />
 
       <main id="top">
         {/* ---------------- HERO ---------------- */}
         <section className="hero">
+          <HeroScene />
           <div className="hero-inner">
             <a href="#engine" className="pill hero-in" style={d(100)}>
               <span className="pill-dot" />
@@ -76,7 +76,7 @@ export default function Home() {
             </ul>
           </div>
           <p className="hero-hint hero-in" style={d(1100)}>
-            <span className="mouse" /> Move, scroll or click the orb
+            <span className="mouse" /> Scroll to explore
           </p>
         </section>
 
@@ -185,7 +185,7 @@ export default function Home() {
             <article className="card spot b-review" data-reveal style={d(80)}>
               <div className="viz viz-review">
                 <div className="avatars">
-                  {['var(--violet)', 'var(--cyan)', 'var(--pink)', 'var(--b-soft)'].map((c, i) => (
+                  {['#3a3936', '#4d4c48', '#62615c', '#7a7974'].map((c, i) => (
                     <span key={c} style={{ background: c }}>
                       {['AK', 'JR', 'ML', 'SO'][i]}
                     </span>

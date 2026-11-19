@@ -1,19 +1,19 @@
 export type Palette = {
   bg: string
-  /** deep shade: orb body, shadows */
+  /** low */
   a: string
-  /** main accent: rims, highlights */
+  /** mid */
   b: string
-  /** pale tint: hot spots */
+  /** high */
   c: string
 }
 
-/** MediaEX uses a single blue accent; the 3D scenes draw only shades of it. Keep in sync with --accent in globals.css. */
+/** Neutral greys for the Engine wave field; the page is monochrome with orange (#ff5b1f) reserved for CTAs. */
 export const THEME: Palette = {
-  bg: '#07080b',
-  a: '#2f4bd8',
-  b: '#6f8cff',
-  c: '#d6deff',
+  bg: '#0a0a0a',
+  a: '#3a3936',
+  b: '#9a9994',
+  c: '#f2f1ee',
 }
 
 export function currentPalette(): Palette {

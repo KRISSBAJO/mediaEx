@@ -1,30 +1,30 @@
 :root {
-  --bg: #07080b;
-  --bg-rgb: 7 8 11;
-  --bg-2: #0c0d12;
+  /* monochrome, warm-neutral; one signal orange reserved for calls to action */
+  --bg: #0a0a0a;
+  --bg-rgb: 10 10 10;
+  --bg-2: #111110;
   --surface: rgb(var(--bg-rgb) / 0.62);
   --surface-2: rgba(255, 255, 255, 0.035);
   --line: rgba(255, 255, 255, 0.08);
   --line-2: rgba(255, 255, 255, 0.14);
-  --text: #ededf0;
-  --muted: #8e919c;
-  --dim: #5d606b;
-  /* one accent: a calm, deep blue, used only in shades */
-  --accent: #6f8cff;
-  --accent-deep: #3552e0;
-  --accent-soft: #a9bbff;
-  --violet: var(--accent-deep);
-  --cyan: var(--accent);
-  --pink: var(--accent-soft);
-  --a-rgb: 53 82 224;
-  --b-rgb: 111 140 255;
-  --c-rgb: 169 187 255;
-  --a-soft: var(--accent-soft);
-  --b-soft: var(--accent-soft);
-  --c-soft: var(--accent-soft);
+  --text: #f2f1ee;
+  --muted: #8c8b87;
+  --muted-2: #6f6e6a;
+  --dim: #5a5955;
+  --accent: #ff5b1f;
+  --acc-rgb: 255 91 31;
+  --violet: #2b2b2a;
+  --cyan: #d9d8d4;
+  --pink: #6f6e6a;
+  --a-rgb: 255 255 255;
+  --b-rgb: 255 255 255;
+  --c-rgb: 255 255 255;
+  --a-soft: #d9d8d4;
+  --b-soft: #d9d8d4;
+  --c-soft: #d9d8d4;
   --green: #3fcf8e;
-  --grad: linear-gradient(90deg, var(--accent-deep), var(--accent));
-  --btn-grad: #4361f0;
+  --grad: linear-gradient(90deg, #6f6e6a, #f2f1ee);
+  --btn-grad: var(--accent);
   --radius: 20px;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --font-display: var(--font-sora), system-ui, sans-serif;
@@ -75,23 +75,23 @@ p {
 }
 
 ::selection {
-  background: rgb(var(--a-rgb) / 0.45);
+  background: rgb(var(--acc-rgb) / 0.4);
 }
 
 .grad-text {
-  color: var(--accent-soft);
+  color: var(--muted-2);
 }
 
 /* ------------------------------------------------ canvas */
 .hero-canvas {
-  position: fixed;
+  position: absolute;
   inset: 0;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   z-index: 0;
   display: block;
   opacity: 0;
-  transition: opacity 1.2s var(--ease);
+  transition: opacity 1.4s var(--ease);
 }
 .hero-canvas.is-ready {
   opacity: 1;
@@ -139,13 +139,13 @@ main,
   width: 100%;
 }
 .btn-primary {
-  color: #fff;
+  color: #0a0a0a;
   background: var(--btn-grad);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25) inset, 0 10px 40px -10px rgb(var(--a-rgb) / 0.8);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25) inset, 0 8px 24px -14px rgb(var(--acc-rgb) / 0.6);
 }
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4) inset, 0 18px 50px -12px rgb(var(--b-rgb) / 0.75);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4) inset, 0 12px 30px -14px rgb(var(--acc-rgb) / 0.7);
 }
 .btn-ghost {
   color: var(--text);
@@ -215,7 +215,7 @@ main,
   letter-spacing: -0.02em;
 }
 .brand b {
-  color: var(--accent);
+  color: inherit;
 }
 .nav-links {
   display: flex;
@@ -285,6 +285,7 @@ main,
 /* ------------------------------------------------ hero */
 .hero {
   position: relative;
+  overflow: hidden;
   min-height: 100vh;
   min-height: 100svh;
   display: flex;
@@ -293,14 +294,16 @@ main,
 }
 .hero::before {
   content: '';
+  z-index: 1;
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(90deg, rgb(var(--bg-rgb) / 0.88) 0%, rgb(var(--bg-rgb) / 0.55) 34%, rgb(var(--bg-rgb) / 0) 62%),
-    linear-gradient(0deg, var(--bg) 0%, rgb(var(--bg-rgb) / 0) 22%);
+  background: linear-gradient(90deg, rgb(var(--bg-rgb) / 0.7) 0%, rgb(var(--bg-rgb) / 0) 50%),
+    linear-gradient(0deg, var(--bg) 0%, rgb(var(--bg-rgb) / 0) 18%);
 }
 .hero-inner {
   position: relative;
+  z-index: 2;
   width: 100%;
   max-width: 1200px;
   margin: 0 auto;
@@ -320,8 +323,8 @@ main,
   transition: border-color 0.3s, background 0.3s;
 }
 .pill:hover {
-  border-color: rgb(var(--a-rgb) / 0.6);
-  background: rgb(var(--a-rgb) / 0.1);
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.07);
 }
 .pill > span:nth-child(2) {
   padding: 3px 9px;
@@ -330,8 +333,8 @@ main,
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #fff;
-  background: var(--grad);
+  color: #0a0a0a;
+  background: var(--text);
 }
 .pill-dot {
   width: 8px;
@@ -339,7 +342,7 @@ main,
   margin-left: 6px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 0 rgb(var(--b-rgb) / 0.6);
+  box-shadow: 0 0 0 0 rgb(var(--acc-rgb) / 0.6);
   animation: ping 2s infinite;
 }
 .pill .arrow {
@@ -349,15 +352,15 @@ main,
 }
 @keyframes ping {
   70% {
-    box-shadow: 0 0 0 8px rgb(var(--b-rgb) / 0);
+    box-shadow: 0 0 0 8px rgb(var(--acc-rgb) / 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgb(var(--b-rgb) / 0);
+    box-shadow: 0 0 0 0 rgb(var(--acc-rgb) / 0);
   }
 }
 .hero-title {
   margin: 26px 0 24px;
-  font-size: clamp(44px, 7.4vw, 96px);
+  font-size: clamp(44px, 6vw, 84px);
   font-weight: 700;
   letter-spacing: -0.045em;
   line-height: 1;
@@ -426,7 +429,7 @@ main,
   height: 5px;
   border-radius: 50%;
   background: var(--cyan);
-  box-shadow: 0 0 10px var(--cyan);
+  box-shadow: none;
 }
 .hero-meta b {
   color: var(--text);
@@ -434,6 +437,7 @@ main,
 }
 .hero-hint {
   position: absolute;
+  z-index: 2;
   bottom: 30px;
   left: 50%;
   translate: -50% 0;
@@ -564,13 +568,13 @@ main,
   font-size: 12.5px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--a-soft);
+  color: var(--muted);
 }
 .eyebrow::before {
   content: '';
   width: 22px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, var(--a-soft));
+  background: linear-gradient(90deg, transparent, var(--muted-2));
 }
 
 /* reveal */
@@ -607,7 +611,7 @@ main,
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: radial-gradient(420px circle at var(--mx, -500px) var(--my, -500px), rgb(var(--a-rgb) / 0.14), transparent 45%);
+  background: radial-gradient(420px circle at var(--mx, -500px) var(--my, -500px), rgba(255, 255, 255, 0.05), transparent 45%);
   opacity: 0;
   transition: opacity 0.4s;
 }
@@ -618,7 +622,7 @@ main,
   border-radius: inherit;
   padding: 1px;
   pointer-events: none;
-  background: radial-gradient(300px circle at var(--mx, -500px) var(--my, -500px), rgb(var(--b-rgb) / 0.7), rgb(var(--a-rgb) / 0.35) 40%, transparent 70%);
+  background: radial-gradient(300px circle at var(--mx, -500px) var(--my, -500px), rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0.12) 40%, transparent 70%);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -696,7 +700,7 @@ main,
   background: linear-gradient(135deg, var(--pink), var(--violet));
 }
 .file-ico.ico-2 {
-  background: linear-gradient(135deg, var(--accent-soft), var(--accent));
+  background: linear-gradient(135deg, var(--pink), var(--cyan));
 }
 .file-body {
   flex: 1;
@@ -834,7 +838,7 @@ main,
   flex: 1;
   min-height: 110px;
   border-radius: 10px;
-  background: linear-gradient(180deg, #6f8cff 0%, #2f4bd8 45%, #0d1430 100%);
+  background: linear-gradient(180deg, #8c8b87 0%, #3a3936 45%, #121211 100%);
   overflow: hidden;
 }
 .frame::before {
@@ -846,14 +850,14 @@ main,
   height: 54px;
   margin-left: -27px;
   border-radius: 50%;
-  background: #e4eaff;
-  box-shadow: 0 0 40px #a9bbff;
+  background: #f2f1ee;
+  box-shadow: 0 0 40px rgba(255, 255, 255, 0.6);
 }
 .frame::after {
   content: '';
   position: absolute;
   inset: 62% 0 0;
-  background: linear-gradient(180deg, #121a3d, #080b18);
+  background: linear-gradient(180deg, #1a1a19, #0a0a0a);
 }
 .scene-tag {
   position: absolute;
@@ -1047,7 +1051,7 @@ html:not(.motion) .viz-chart i {
   overflow: hidden;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  background: radial-gradient(80% 60% at 50% 100%, rgb(var(--a-rgb) / 0.14), transparent 70%), rgb(var(--bg-rgb) / 0.86);
+  background: radial-gradient(80% 60% at 50% 100%, rgba(255, 255, 255, 0.04), transparent 70%), rgb(var(--bg-rgb) / 0.86);
 }
 .terrain-canvas {
   position: absolute;
@@ -1104,7 +1108,7 @@ html:not(.motion) .viz-chart i {
 .stat-num em {
   font-style: normal;
   margin-left: 2px;
-  color: var(--accent);
+  color: var(--muted-2);
 }
 .stat p {
   margin-top: 10px;
@@ -1137,7 +1141,7 @@ html:not(.motion) .viz-chart i {
   background: var(--grad);
   transform-origin: left;
   transform: scaleX(var(--p, 0));
-  box-shadow: 0 0 12px rgb(var(--b-rgb) / 0.8);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.3);
 }
 .step {
   padding: 28px 26px;
@@ -1151,8 +1155,8 @@ html:not(.motion) .viz-chart i {
   font-family: var(--font-code);
   font-size: 14px;
   color: #fff;
-  background: linear-gradient(135deg, rgb(var(--a-rgb) / 0.35), rgb(var(--b-rgb) / 0.2));
-  border: 1px solid rgb(var(--a-rgb) / 0.5);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-2);
 }
 .step h3 {
   font-size: 24px;
@@ -1208,7 +1212,7 @@ html:not(.motion) .viz-chart i {
 }
 .code {
   background: rgb(var(--bg-rgb) / 0.78);
-  box-shadow: 0 40px 100px -40px rgb(var(--a-rgb) / 0.55);
+  box-shadow: 0 40px 100px -40px rgba(0, 0, 0, 0.7);
 }
 .code-bar {
   display: flex;
@@ -1242,16 +1246,16 @@ html:not(.motion) .viz-chart i {
   font-family: inherit;
 }
 .code .k {
-  color: var(--accent);
+  color: var(--muted);
 }
 .code .s {
-  color: var(--accent-soft);
+  color: #d9d8d4;
 }
 .code .f {
   color: #ffffff;
 }
 .code .c2 {
-  color: var(--accent-soft);
+  color: #d9d8d4;
 }
 .code .cm {
   color: var(--dim);
@@ -1271,7 +1275,7 @@ html:not(.motion) .viz-chart i {
   font-weight: 500;
 }
 .ok {
-  color: var(--accent);
+  color: var(--text);
   margin-right: 6px;
 }
 
@@ -1300,7 +1304,7 @@ html:not(.motion) .viz-chart i {
   transition: color 0.3s;
 }
 .billing button.is-active {
-  color: #fff;
+  color: #0a0a0a;
 }
 .billing-thumb {
   position: absolute;
@@ -1309,7 +1313,7 @@ html:not(.motion) .viz-chart i {
   width: 140px;
   height: calc(100% - 8px);
   border-radius: 999px;
-  background: var(--btn-grad);
+  background: var(--text);
   transition: transform 0.5s var(--ease);
 }
 .save {
@@ -1329,9 +1333,9 @@ html:not(.motion) .viz-chart i {
   flex-direction: column;
 }
 .plan.is-featured {
-  border-color: rgb(var(--a-rgb) / 0.55);
-  background: linear-gradient(180deg, rgb(var(--a-rgb) / 0.16), rgb(var(--bg-rgb) / 0.7) 45%);
-  box-shadow: 0 40px 100px -50px rgb(var(--a-rgb) / 0.8);
+  border-color: rgba(255, 255, 255, 0.22);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgb(var(--bg-rgb) / 0.7) 45%);
+  box-shadow: 0 40px 100px -50px rgba(0, 0, 0, 0.8);
 }
 .plan-tag {
   position: absolute;
@@ -1341,8 +1345,8 @@ html:not(.motion) .viz-chart i {
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 700;
-  color: #fff;
-  background: var(--grad);
+  color: #0a0a0a;
+  background: var(--text);
 }
 .plan h3 {
   font-size: 22px;
@@ -1410,7 +1414,7 @@ html:not(.motion) .viz-chart i {
   height: 500px;
   translate: -50% 0;
   border-radius: 50%;
-  background: radial-gradient(closest-side, rgb(var(--a-rgb) / 0.55), rgb(var(--b-rgb) / 0.18) 60%, transparent);
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02) 60%, transparent);
   filter: blur(20px);
   pointer-events: none;
 }
@@ -1571,8 +1575,8 @@ html:not(.motion) .viz-chart i {
 
 @media (max-width: 700px) {
   .hero {
-    align-items: flex-end;
-    padding: 110px 16px 96px;
+    align-items: flex-start;
+    padding: max(300px, 42svh) 16px 96px;
   }
   .hero::before {
     background: linear-gradient(0deg, rgb(var(--bg-rgb) / 0.95) 0%, rgb(var(--bg-rgb) / 0.75) 45%, rgb(var(--bg-rgb) / 0) 75%);
