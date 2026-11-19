@@ -68,7 +68,12 @@ function studioEnvironment(renderer: THREE.WebGLRenderer) {
   return rt
 }
 
-export default function HeroScene() {
+/**
+ * `frame`: centred in the landing-page viewfinder and turned by scroll.
+ * `panel`: centred in its container (auth side panel).
+ * `hero`: the older full-bleed layout beside the headline.
+ */
+export default function HeroScene({ mode = 'hero' }: { mode?: 'hero' | 'panel' | 'frame' }) {
   const ref = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -189,12 +194,17 @@ export default function HeroScene() {
     const resize = () => {
       const w = host.clientWidth
       const h = host.clientHeight
+      if (!w || !h) return // hidden (e.g. the auth side panel on small screens)
       renderer.setSize(w, h, false)
       camera.aspect = w / h
       camera.updateProjectionMatrix()
       const halfH = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * CAM_Z
       const halfW = halfH * camera.aspect
-      if (w >= 900) {
+      if (mode === 'frame') {
+        Object.assign(layout, { x: 0, y: 0, scale: Math.min(1.1, (halfH * 2 * 0.62) / 2.4, (halfW * 2 * 0.34) / 2.6) })
+      } else if (mode === 'panel') {
+        Object.assign(layout, { x: 0, y: halfH * 0.12, scale: Math.min(1, halfW / 3.1, halfH / 2.6) })
+      } else if (w >= 900) {
         const scale = Math.min(1, halfW / 5)
         Object.assign(layout, { x: Math.max(halfW * 0.55, halfW - 2.0 * scale), y: -0.05, scale })
       }
@@ -235,9 +245,10 @@ export default function HeroScene() {
       const introE = easeOutCubic(intro)
       pointer.x += (pointer.tx - pointer.x) * 0.05
       pointer.y += (pointer.ty - pointer.y) * 0.05
-      const scroll = clamp01(window.scrollY / Math.max(host.clientHeight, 1))
+      const scroll =
+        mode === 'panel' ? 0 : clamp01(window.scrollY / Math.max(mode === 'frame' ? host.clientHeight * 1.6 : host.clientHeight, 1))
 
-      rig.position.set(layout.x, layout.y + scroll * 0.9, 0)
+      rig.position.set(layout.x, layout.y + (mode === 'hero' ? scroll * 0.9 : 0), 0)
       rig.scale.setScalar(layout.scale)
 
       // prism: a deliberate three-quarter view, a slow sway, the cursor tilts it, scroll turns it away
@@ -300,7 +311,7 @@ export default function HeroScene() {
       envRT.dispose()
       renderer.dispose()
     }
-  }, [])
+  }, [mode])
 
   return <canvas ref={ref} className="hero-canvas" aria-hidden="true" />
 }

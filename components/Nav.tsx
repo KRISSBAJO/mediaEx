@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import Logo from './Logo'
 
@@ -38,12 +39,12 @@ export default function Nav() {
           ))}
         </nav>
         <div className="nav-cta">
-          <a href="#pricing" className="nav-signin">
+          <Link href="/sign-in" className="nav-signin">
             Sign in
-          </a>
-          <a href="#pricing" className="btn btn-primary btn-sm">
+          </Link>
+          <Link href="/sign-up" className="btn btn-primary btn-sm">
             Start free
-          </a>
+          </Link>
           <button
             className="nav-burger"
             aria-label={open ? 'Close menu' : 'Open menu'}

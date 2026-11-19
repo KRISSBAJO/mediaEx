@@ -4,6 +4,7 @@ import Nav from '@/components/Nav'
 import MotionRoot from '@/components/MotionRoot'
 import Pricing from '@/components/Pricing'
 import Logo from '@/components/Logo'
+import Timecode from '@/components/Timecode'
 
 const BRANDS = ['Northwind Studios', 'Lumen Pictures', 'Kairo Audio', 'Halcyon', 'Driftwave', 'Orbit FM', 'Paperplane', 'Nightjar Films', 'Atlas Sports', 'Mono/Poly']
 
@@ -25,59 +26,46 @@ export default function Home() {
 
       <main id="top">
         {/* ---------------- HERO ---------------- */}
-        <section className="hero">
-          <HeroScene />
-          <div className="hero-inner">
-            <a href="#engine" className="pill hero-in" style={d(100)}>
-              <span className="pill-dot" />
-              <span>New</span>
-              MediaEX 2.0 with AI Studio
-              <Arrow />
-            </a>
-            <h1 className="hero-title">
-              <span className="line">
-                <span className="hero-word" style={d(200)}>
-                  Upload once.
-                </span>
+        <section className="hero" aria-label="Introduction">
+          <div className="viewfinder">
+            <HeroScene mode="frame" />
+            <span className="vf-corner tl" aria-hidden="true" />
+            <span className="vf-corner tr" aria-hidden="true" />
+            <span className="vf-corner bl" aria-hidden="true" />
+            <span className="vf-corner br" aria-hidden="true" />
+            <div className="vf-meta top" aria-hidden="true">
+              <span className="vf-live">
+                <i />
+                Live
               </span>
-              <span className="line">
-                <span className="hero-word grad-text" style={d(320)}>
-                  Stream everywhere.
-                </span>
-              </span>
-            </h1>
-            <p className="hero-sub hero-in" style={d(480)}>
-              MediaEX is the media cloud for creators and teams. Store, transcode, edit and deliver video, audio and images
-              to every screen on the planet in milliseconds.
-            </p>
-            <div className="hero-ctas hero-in" style={d(600)}>
-              <a href="#pricing" className="btn btn-primary btn-lg">
-                Start free <Arrow />
-              </a>
-              <a href="#engine" className="btn btn-ghost btn-lg">
-                <span className="play-dot">
-                  <svg viewBox="0 0 12 12" aria-hidden="true">
-                    <path d="M4 2.5v7l5.5-3.5L4 2.5Z" fill="currentColor" />
-                  </svg>
-                </span>
-                Watch the demo
-              </a>
+              <Timecode />
             </div>
-            <ul className="hero-meta hero-in" style={d(720)}>
-              <li>
-                <b>8K</b> HDR &amp; Dolby Atmos
-              </li>
-              <li>
-                <b>190+</b> edge locations
-              </li>
-              <li>
-                <b>99.99%</b> uptime SLA
-              </li>
-            </ul>
+            <div className="vf-meta bottom" aria-hidden="true">
+              <span>4K · 24 fps · HDR</span>
+              <span className="hide-sm">Edge · Lagos → Paris → New York</span>
+            </div>
           </div>
-          <p className="hero-hint hero-in" style={d(1100)}>
-            <span className="mouse" /> Scroll to explore
-          </p>
+          <div className="hero-copy">
+            <h1 className="hero-title hero-anim" style={d(250)}>
+              Upload once.
+              <br />
+              Stream everywhere.
+            </h1>
+            <div className="hero-aside hero-anim" style={d(400)}>
+              <p>
+                MediaEX is the media cloud for creators and studios. Store, transcode and deliver video, audio and images
+                to every screen in milliseconds.
+              </p>
+              <div className="hero-actions">
+                <a href="/sign-up" className="btn btn-primary btn-lg">
+                  Start free <Arrow />
+                </a>
+                <a href="#engine" className="link-arrow">
+                  Watch the film <Arrow />
+                </a>
+              </div>
+            </div>
+          </div>
         </section>
 
         {/* ---------------- BRANDS ---------------- */}
@@ -371,7 +359,7 @@ export default function Home() {
             </h2>
             <p>Join 40,000+ creators and studios streaming with MediaEX. Free forever plan, no card required.</p>
             <div className="hero-ctas center">
-              <a href="#pricing" className="btn btn-primary btn-lg">
+              <a href="/sign-up" className="btn btn-primary btn-lg">
                 Start free <Arrow />
               </a>
               <a href="#pricing" className="btn btn-ghost btn-lg">

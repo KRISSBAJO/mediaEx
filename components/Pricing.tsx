@@ -77,7 +77,7 @@ export default function Pricing() {
               <span className="per">/ month</span>
             </div>
             <p className="plan-note">{p.monthly === 0 ? 'Free forever' : yearly ? 'Billed yearly' : 'Billed monthly'}</p>
-            <a href="#top" className={`btn ${p.featured ? 'btn-primary' : 'btn-ghost'} btn-block`}>
+            <a href={p.name === 'Studio' ? '#top' : '/sign-up'} className={`btn ${p.featured ? 'btn-primary' : 'btn-ghost'} btn-block`}>
               {p.cta}
             </a>
             <ul>
