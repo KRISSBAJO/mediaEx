@@ -1,18 +1,39 @@
-// Server-side transport for the standalone MediaEX API. BACKEND_URL is supplied by the operator.
+function safeApiPath(path: string) {
+  if (path.includes('//')) return false
+  try {
+    return path.split('/').every((part) => {
+      if (!part) return true
+      const segment = decodeURIComponent(part)
+      return segment !== '.' && segment !== '..' && /^[\p{L}\p{N}._~-]+$/u.test(segment)
+    })
+  } catch {
+    return false
+  }
+}
+
+// Allow an operator-configured gateway prefix. Validate the raw paths before URL normalizes dot segments.
 export async function backendFetch(path: string, init: RequestInit & { duplex?: 'half' } = {}) {
   const configured = process.env.BACKEND_URL ?? (process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:3401')
   if (!configured) throw new Error('BACKEND_URL is required.')
-  const base = new URL(configured)
-  const url = new URL(path, base)
-  if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.pathname !== '/' ||
-      base.search || base.hash || url.origin !== base.origin || !url.pathname.startsWith('/api/')) {
+  const base = /^(https?:\/\/[^\s/@?#\\%]+)(\/[^?#]*)?$/i.exec(configured)
+  const prefix = (base?.[2] ?? '').replace(/\/$/, '')
+  const pathname = path.split('?', 1)[0]
+  if (!base || !safeApiPath(base[2] ?? '') || !pathname.startsWith('/api/') ||
+      !safeApiPath(pathname) || path.includes('#')) {
     throw new Error('Invalid MediaEX API destination.')
   }
+  const url = new URL(prefix + path, base[1])
   const headers = new Headers(init.headers)
   const token = process.env.MEDIAEX_API_TOKEN
   if (process.env.NODE_ENV === 'production' && (!token || token.length < 32)) throw new Error('MEDIAEX_API_TOKEN is required.')
   headers.delete('x-mediaex-service-token')
   if (token) headers.set('x-mediaex-service-token', token)
+  headers.delete('x-mediaex-auth-cookie')
+  if (prefix) {
+    const cookie = authCookies(headers)
+    headers.delete('cookie')
+    if (cookie) headers.set('x-mediaex-auth-cookie', cookie)
+  }
   return fetch(url, { ...init, headers, cache: 'no-store', redirect: 'manual' })
 }
 
