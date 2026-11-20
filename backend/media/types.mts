@@ -329,3 +329,26 @@ export type BillingState = {
   }
   prices: { plan: PlanId; interval: BillingInterval; amount: number; currency: string }[]
 }
+
+/** A retention rule moves matching media to Trash (30-day restore window) once it is old enough. See retention.mts. */
+export type RetentionBasis = 'created' | 'unplayed'
+export type RetentionDraft = {
+  name: string
+  enabled: boolean
+  folderId: string | null
+  includeSubfolders: boolean
+  kinds: MediaType[]
+  tag: string | null
+  basis: RetentionBasis
+  days: number
+}
+export type RetentionRule = RetentionDraft & {
+  id: string
+  lastRunAt: string | null
+  lastMoved: number
+  totalMoved: number
+  createdAt: string
+  updatedAt: string
+}
+export type RetentionPreview = { count: number; bytes: number; samples: { id: string; title: string; type: MediaType }[] }
+export type RetentionEvent = { name: string; action: string; moved: number | null; actor: string | null; createdAt: string }

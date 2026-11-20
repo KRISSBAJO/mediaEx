@@ -2,6 +2,7 @@ import { pool } from '../auth.mts'
 import { prefixOf, type AssetRow } from './assets.mts'
 import { cleanupEnabled } from './operations.mts'
 import { cleanPermanentDeletions, purgeExpiredTrash } from './recovery.mts'
+import { applyRetentionRules } from './retention.mts'
 import { storage } from './storage.mts'
 
 const batchSize = 10
@@ -60,6 +61,7 @@ export function startOperationsMaintenance() {
     try {
       await cleanPermanentDeletions()
       await pruneOperationalHistory()
+      await applyRetentionRules()
       if (cleanupEnabled()) {
         await cleanExpiredUploads()
         await purgeExpiredTrash()

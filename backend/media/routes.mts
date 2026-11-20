@@ -9,6 +9,7 @@
  *   POST   /api/assets/:id/restore            restore during the 30-day recovery window
  *   GET    /api/assets/:id/revisions          version and recovery history
  *   POST   /api/assets/:id/revisions          publish a replacement or restore a saved version
+ *   (retention rules, /api/assets/retention: see retention.mts)
  *   POST   /api/assets/:id/retry             run the pipeline again
  *   POST   /api/uploads                      start an upload           { fileName, size, mimeType, multipart? }
  *   PUT    /api/uploads/:id                  the file itself (local-disk storage only)
@@ -32,6 +33,7 @@
  * The frontend forwards these paths unchanged (see app/api/*).
  */
 import { recovery, trashAssets } from './recovery.mts'
+import { handleRetention } from './retention.mts'
 import type { PoolClient } from 'pg'
 import { pool } from '../auth.mts'
 import { guessType, normaliseTag, parseQuery } from './types.mts'
@@ -466,6 +468,7 @@ export async function handleMedia(req: Request, pathname: string): Promise<Respo
   if (['folders', 'collections', 'tags', 'searches'].includes(parts[1])) return handle(() => handleLibrary(req, parts))
   if (parts[1] === 'moderation' && parts.length === 3) return handle(() => handleModeration(req, parts[2]))
   if (parts[1] === 'assets' && parts[2] === 'trash' && parts.length === 3) return handle(async () => recovery(await sessionActor(req.headers), req, undefined, 'trash'))
+  if (parts[1] === 'assets' && parts[2] === 'retention' && parts.length <= 5) return handle(() => handleRetention(req, parts))
   if (parts[1] === 'assets' && parts[2] === 'bulk' && parts.length === 3) return handle(() => bulk(req))
   let id: string | undefined
   try {
