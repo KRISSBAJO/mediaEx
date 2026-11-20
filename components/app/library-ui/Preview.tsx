@@ -8,7 +8,8 @@ import MediaPlayer from '../MediaPlayer'
 import MetadataEditor from '../MetadataEditor'
 import { flatTree, useLibrary } from '../library'
 import { Ago, dims, useMedia } from '../media'
-import { ModerationBadge, StatusBadge, copyText } from '../ui'
+import { ModerationBadge, StatusBadge } from '../ui'
+import ShareLink from '../ShareLink'
 import { CollectDialog, TagInput } from './dialogs'
 
 export default function Preview({ id, onClose }: { id: string; onClose: () => void }) {
@@ -35,11 +36,7 @@ export default function Preview({ id, onClose }: { id: string; onClose: () => vo
           <Link href={`/dashboard/library/${a.id}`} className="btn btn-primary btn-sm">
             Open
           </Link>
-          {a.status === 'ready' && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(`${window.location.origin}/embed/${a.id}`, 'Share link copied')}>
-              <Icon name="link" size={14} /> Share link
-            </button>
-          )}
+          <ShareLink asset={a} />
           {a.status !== 'uploading' && (
             <a className="btn btn-ghost btn-sm" href={`/api/media/${a.id}/original`} aria-label="Download original">
               <Icon name="file" size={14} />
