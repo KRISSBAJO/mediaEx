@@ -3,11 +3,12 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { STAGES, isActive } from '@/lib/media/types'
+import { STAGES, isActive, type MediaAsset } from '@/lib/media/types'
 import { bytes, duration as fmtDuration } from '@/lib/sample'
 import Icon from '../Icon'
 import MediaPlayer from '../MediaPlayer'
 import MetadataEditor from '../MetadataEditor'
+import { VersionPanel } from './Recovery'
 import CaptionsPanel from '../CaptionsPanel'
 import TransformBuilder from '../TransformBuilder'
 import { flatTree, request, useLibrary } from '../library'
@@ -94,13 +95,33 @@ function PlaybackAccess({ id, policy, approved, link, setLink, onChange }: {
   )
 }
 
-export default function AssetDetail({ id }: { id: string }) {
+export default function AssetDetail({ id, initial }: { id: string; initial: MediaAsset }) {
   const { get, loaded, remove, update, retry } = useMedia()
   const lib = useLibrary()
   const { workspace } = useAccount()
   const media = useMedia()
   const [collecting, setCollecting] = useState(false)
-  const a = get(id)
+  const recent = get(id)
+  const [detail, setDetail] = useState<MediaAsset | null>(initial)
+  useEffect(() => {
+    if (recent) return
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout>
+    const refreshDetail = async () => {
+      try {
+        const response = await fetch(`/api/assets/${id}`, { cache: 'no-store', signal: controller.signal })
+        if (response.status === 404 && !controller.signal.aborted) setDetail(null)
+        else if (response.ok) {
+          const { asset } = await response.json() as { asset: MediaAsset }
+          if (!controller.signal.aborted) setDetail(asset)
+        }
+      } catch { /* keep the last successful read */ }
+      if (!controller.signal.aborted) timer = setTimeout(refreshDetail, isActive(detail ?? initial) ? 1500 : 30000)
+    }
+    void refreshDetail()
+    return () => { clearTimeout(timer); controller.abort() }
+  }, [id, recent, initial, detail?.status])
+  const a = recent ?? detail
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('renditions')
   const [more, setMore] = useState(false)
@@ -198,7 +219,7 @@ export default function AssetDetail({ id }: { id: string }) {
                 )}
                 <hr />
                 <button type="button" role="menuitem" className="is-danger" onClick={() => (setMore(false), setConfirm(true))}>
-                  <Icon name="trash" size={15} /> Delete asset
+                  <Icon name="trash" size={15} /> {a.status === 'uploading' ? 'Cancel upload' : 'Move to Trash'}
                 </button>
               </div>
             )}
@@ -317,7 +338,7 @@ export default function AssetDetail({ id }: { id: string }) {
                 </Card>
               )}
 
-              {tab === 'transform' && <TransformBuilder asset={a} />}
+              {tab === 'transform' && <TransformBuilder asset={a} link={signedLink} onIssue={(link) => setIssued({ id, link })} />}
 
               {tab === 'captions' && <CaptionsPanel asset={a} />}
 
@@ -463,6 +484,11 @@ export default function AssetDetail({ id }: { id: string }) {
               </div>
             </div>
           </Card>
+          {ready && canManage(workspace.role) && <VersionPanel key={a.id} asset={a} onChanged={async () => {
+            const updated = await request<{ asset: MediaAsset }>('/api/assets/' + a.id)
+            setDetail(updated.asset)
+            await Promise.all([media.refresh(), lib.reload()])
+          }} />}
         </aside>
       </div>
 
@@ -498,8 +524,8 @@ export default function AssetDetail({ id }: { id: string }) {
       {confirm && (
         <div className="dialog-scrim" onPointerDown={(e) => e.target === e.currentTarget && setConfirm(false)}>
           <div className="dialog" role="alertdialog" aria-modal="true" aria-labelledby="del-title">
-            <h2 id="del-title">Delete “{a.title}”?</h2>
-            <p>The original and every rendition are removed from storage, and share links and embeds stop playing. This can’t be undone.</p>
+            <h2 id="del-title">{a.status === 'uploading' ? 'Cancel upload' : 'Move to Trash'}?</h2>
+            <p>{a.status === 'uploading' ? 'The incomplete upload will be discarded.' : `Share links for “${a.title}” will stop working. A workspace owner or admin can restore the asset for 30 days.`}</p>
             <div className="dialog-foot">
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirm(false)} autoFocus>
                 Cancel
@@ -512,7 +538,7 @@ export default function AssetDetail({ id }: { id: string }) {
                   if (await remove(a.id)) router.push('/dashboard/library')
                 }}
               >
-                Delete asset
+                {a.status === 'uploading' ? 'Cancel upload' : 'Move to Trash'}
               </button>
             </div>
           </div>

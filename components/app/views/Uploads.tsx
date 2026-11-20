@@ -3,10 +3,10 @@
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { ACCEPT_ATTR, STAGES, guessType, isActive } from '@/lib/media/types'
+import { ACCEPT_ATTR, STAGES, guessType, isActive, type UploadPreset } from '@/lib/media/types'
 import { bytes } from '@/lib/sample'
 import Icon from '../Icon'
-import { flatTree, useLibrary } from '../library'
+import { flatTree, request, useLibrary } from '../library'
 import { useMedia, type Transfer } from '../media'
 import { Card, ModerationBadge, PageHead, StatusBadge, Thumb } from '../ui'
 
@@ -29,11 +29,25 @@ export default function Uploads() {
   const lib = useLibrary()
   const params = useSearchParams()
   const [folderId, setFolderId] = useState<string | null>(params.get('folder'))
+  const [presets, setPresets] = useState<UploadPreset[]>([])
+  const [maxBytes, setMaxBytes] = useState<number | null>(null)
+  const [presetError, setPresetError] = useState('')
+  const [presetId, setPresetId] = useState('')
+  const [refresh, setRefresh] = useState(0)
+  useEffect(() => {
+    const abort = new AbortController()
+    request<{ presets: UploadPreset[]; maxUploadBytes: number }>('/api/uploads/presets', { signal: abort.signal })
+      .then(data => { setPresets(data.presets); setMaxBytes(data.maxUploadBytes); setPresetError('') })
+      .catch(error => { if (!abort.signal.aborted) setPresetError(error.message) })
+    return () => abort.abort()
+  }, [refresh])
+  const preset = presetId ? presets.find(p => p.id === presetId) : presets.find(p => p.isDefault)
+  const destination = preset ? preset.folderId : folderId
   // a folder link from the library wins; drop it if that folder no longer exists
   useEffect(() => {
     if (lib.ready && folderId && !lib.folders.some((f) => f.id === folderId)) setFolderId(null)
   }, [lib.ready, lib.folders, folderId])
-  const target = folderId ? lib.folderPath(folderId).map((f) => f.name).join(' / ') : null
+  const target = destination ? lib.folderPath(destination).map((f) => f.name).join(' / ') : null
   const [drag, setDrag] = useState(false)
   const input = useRef<HTMLInputElement>(null)
   const sessionIds = new Set(transfers.map((t) => t.assetId))
@@ -43,9 +57,15 @@ export default function Uploads() {
   return (
     <>
       <PageHead title="Uploads" sub="Drop files to ingest them. MediaEX analyses, encodes and packages each one for streaming.">
+        {presets.length > 0 && <label className="upload-target"><span>Upload preset</span>
+          <select className="select" value={presetId} onChange={e => setPresetId(e.target.value)}>
+            <option value="">Workspace default{presets.find(p => p.isDefault) ? ' · ' + presets.find(p => p.isDefault)!.name : ''}</option>
+            {presets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </label>}
         <label className="upload-target">
           <span>Upload to</span>
-          <select className="select" value={folderId ?? ''} onChange={(e) => setFolderId(e.target.value || null)}>
+          <select className="select" value={destination ?? ''} disabled={!!preset} onChange={(e) => setFolderId(e.target.value || null)}>
             <option value="">No folder</option>
             {flatTree(lib.folders).map(({ folder, depth }) => (
               <option key={folder.id} value={folder.id}>
@@ -58,6 +78,7 @@ export default function Uploads() {
         </label>
       </PageHead>
 
+      {presetError && <p role="alert">{presetError} <button type="button" className="btn btn-quiet btn-sm" onClick={() => setRefresh(n => n + 1)}>Try again</button></p>}
       <div className="grid-2">
         <div className="stack">
           <label
@@ -70,7 +91,7 @@ export default function Uploads() {
             onDrop={(e) => {
               e.preventDefault()
               setDrag(false)
-              upload(e.dataTransfer.files, folderId)
+              if (maxBytes !== null) upload(e.dataTransfer.files, destination, preset?.id)
             }}
           >
             <span className="vf-corner tl" aria-hidden="true" />
@@ -81,10 +102,11 @@ export default function Uploads() {
               ref={input}
               type="file"
               multiple
-              accept={ACCEPT_ATTR}
+              disabled={maxBytes === null}
+              accept={preset ? preset.policy.kinds.map(k => k + '/*').join(',') : ACCEPT_ATTR}
               className="sr-only"
               onChange={(e) => {
-                if (e.target.files) upload(e.target.files, folderId)
+                if (e.target.files) upload(e.target.files, destination, preset?.id)
                 e.target.value = ''
               }}
             />
@@ -92,7 +114,7 @@ export default function Uploads() {
               <Icon name="upload" size={22} />
             </span>
             <b>{drag ? `Drop to upload${target ? ` into ${target}` : ''}` : 'Drag files here, or browse'}</b>
-            <p>Video, audio and images up to 50 GB each — MP4, MOV, MKV, WebM, MXF, WAV, MP3, FLAC, JPEG, PNG and more.</p>
+            <p>{maxBytes === null ? 'Loading upload limits…' : `${preset ? preset.policy.kinds.join(', ') : 'Video, audio and images'} up to ${bytes(preset?.policy.maxBytes ?? maxBytes)} per file.`}</p>
             <span className="btn btn-ghost btn-sm">Browse files</span>
           </label>
 
