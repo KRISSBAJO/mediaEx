@@ -21,17 +21,17 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <aside className="auth-side" aria-hidden="true">
         <HeroScene mode="panel" />
         <div className="auth-side-copy">
-          <p className="auth-side-kicker">MediaEX 2.0</p>
+          <p className="auth-side-kicker">The media cloud</p>
           <p className="auth-side-title">Every frame. Every format. Everywhere.</p>
           <ul>
             <li>
-              <b>8K</b> HDR delivery
+              <b>3</b> codecs per video
             </li>
             <li>
-              <b>190+</b> edge locations
+              <b>50 GB</b> resumable uploads
             </li>
             <li>
-              <b>38 ms</b> to first frame
+              <b>100 GB</b> free to start
             </li>
           </ul>
         </div>

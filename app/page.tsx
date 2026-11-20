@@ -8,7 +8,8 @@ import Footer from '@/components/Footer'
 import Pipeline from '@/components/Pipeline'
 import DevConsole from '@/components/DevConsole'
 
-const BRANDS = ['Northwind Studios', 'Lumen Pictures', 'Kairo Audio', 'Halcyon', 'Driftwave', 'Orbit FM', 'Paperplane', 'Nightjar Films', 'Atlas Sports', 'Mono/Poly']
+// what people ship with it (not a customer list)
+const BRANDS = ['Feature films', 'Music videos', 'Podcasts', 'Course libraries', 'Sports highlights', 'Newsrooms', 'Product launches', 'Live recordings', 'Trailers', 'Social clips']
 
 const d = (ms: number) => ({ ['--d' as string]: `${ms}ms` })
 
@@ -86,9 +87,9 @@ export default function Home() {
         </section>
 
         {/* ---------------- BRANDS ---------------- */}
-        <section className="brands" aria-label="Customers">
+        <section className="brands" aria-label="What it's for">
           <div className="brands-inner">
-            <p className="brands-label">In use at 40,000+ studios, labels and channels</p>
+            <p className="brands-label">One pipeline for everything you publish</p>
             <div className="marquee">
               <div className="marquee-track">
                 {[...BRANDS, ...BRANDS].map((b, i) => (
@@ -133,19 +134,19 @@ export default function Home() {
                 </>
               }
             >
-              GPU encoders at the edge, a global cache and an AI layer that watches every frame.
+              Parallel encoding ladders, uploads that survive a dropped connection, and a player that reports every stall.
             </SectionHead>
             <div className="stats">
               {[
-                { n: 38, s: 'ms', l: 'Median time to first frame' },
-                { n: 12, s: '×', l: 'Faster than real-time encoding' },
-                { n: 40, s: '+', l: 'Caption and dub languages' },
-                { n: 99.99, s: '%', l: 'Uptime across all regions', dec: 2 },
+                { n: 3, s: '', l: 'Codecs per video: H.264, HEVC and AV1' },
+                { n: 50, s: 'GB', l: 'Per upload, resumable in parts' },
+                { n: 8, s: 'K', l: 'Top streaming resolution, on Studio' },
+                { n: 7, s: '', l: 'Signed webhook events' },
               ].map((s, i) => (
                 <div key={s.l} className="stat" data-reveal style={d(i * 90)}>
                   <p>{s.l}</p>
                   <div className="stat-num">
-                    <span data-count={s.n} data-decimals={s.dec ?? 0}>
+                    <span data-count={s.n}>
                       0
                     </span>
                     <em>{s.s}</em>
@@ -182,7 +183,7 @@ export default function Home() {
               },
               {
                 t: 'Process',
-                p: 'MediaEX encodes, captions, tags and packages every asset in parallel on GPUs close to you.',
+                p: 'MediaEX encodes every asset into an adaptive ladder, in H.264 and optionally HEVC and AV1, captions it and packages it for streaming.',
                 k: 'av1 · hevc · captions',
               },
               {
@@ -224,7 +225,7 @@ export default function Home() {
             {[
               ['API keys', 'Scoped to read, upload or full access. Revoke any key instantly.', 'mx_live_••••'],
               ['REST API', 'List, search, upload, edit and delete assets.', '/api/v1'],
-              ['Webhooks', 'Six asset events, signed and retried for a day.', 'HMAC-SHA256'],
+              ['Webhooks', 'Seven asset events, signed and retried for a day.', 'HMAC-SHA256'],
               ['Transforms', 'Any size, crop or format, straight from a URL.', '?w=1200&f=avif'],
             ].map(([t, x, k]) => (
               <div key={t} className="dev-spec">
@@ -239,7 +240,7 @@ export default function Home() {
               Create an API key <Arrow />
             </a>
             <a href="/dashboard/developers" className="link-arrow">
-              Read the docs <Arrow />
+              Open the quickstart <Arrow />
             </a>
           </div>
         </section>

@@ -13,6 +13,7 @@ export type Plan = {
   highlights: string[]
 }
 
+// Every line here is enforced or built: limits live in backend/media/billing.mts, features in backend/media/*.
 export const PLANS: Plan[] = [
   {
     name: 'Creator',
@@ -21,8 +22,8 @@ export const PLANS: Plan[] = [
     yearly: 0,
     cta: 'Start free',
     storageGb: 100,
-    features: ['100 GB storage', '1080p streaming', '50 transcode minutes / mo', 'Auto captions (EN)', 'Community support'],
-    highlights: ['1080p streaming', '50 transcode minutes a month', 'Auto captions in English'],
+    features: ['100 GB storage', 'Streaming up to 1080p', '50 processing minutes / mo', 'Player, API, webhooks and analytics', 'Captions: automatic or uploaded', 'Signed playback links'],
+    highlights: ['Streaming up to 1080p', '50 processing minutes a month', 'Player, API and analytics'],
   },
   {
     name: 'Pro',
@@ -32,36 +33,22 @@ export const PLANS: Plan[] = [
     cta: 'Go Pro',
     featured: true,
     storageGb: 2000,
-    features: [
-      '2 TB storage',
-      '4K HDR streaming',
-      '1,000 transcode minutes / mo',
-      'AI Studio: 40+ caption languages',
-      'Review links & version history',
-      'Custom player branding',
-    ],
-    highlights: ['4K HDR streaming', '1,000 transcode minutes a month', 'Captions in 40+ languages'],
+    features: ['2 TB storage', 'Streaming up to 4K', '1,000 processing minutes / mo', 'HEVC and AV1 encoding', 'Everything in Creator'],
+    highlights: ['Streaming up to 4K', '1,000 processing minutes a month', 'HEVC and AV1 encoding'],
   },
   {
     name: 'Studio',
     blurb: 'For studios and media teams at scale.',
     monthly: 99,
     yearly: 79,
-    cta: 'Talk to us',
+    cta: 'Choose Studio',
     storageGb: 10000,
-    features: [
-      '10 TB storage, then pay as you go',
-      '8K, Dolby Vision & Atmos',
-      'Unlimited transcoding',
-      'DRM, SSO & audit logs',
-      'Dedicated edge capacity',
-      '24/7 priority support',
-    ],
-    highlights: ['8K, Dolby Vision & Atmos', 'Unlimited transcoding', '24/7 priority support'],
+    features: ['10 TB storage, no hard cap', 'Streaming up to 8K', 'Unlimited processing minutes', 'HEVC and AV1 encoding', 'Everything in Pro'],
+    highlights: ['Streaming up to 8K', 'Unlimited processing minutes', '10 TB storage, no hard cap'],
   },
 ]
 
-/** the smallest plan whose storage covers `gb`; past the top plan's allowance it is still the top plan, plus usage */
+/** the smallest plan whose storage covers `gb`; past the top plan's allowance it is still the top plan (Studio has no hard cap) */
 export const planFor = (gb: number) => PLANS.find((p) => gb <= p.storageGb) ?? PLANS[PLANS.length - 1]
 
 export const formatSize = (gb: number) => {
