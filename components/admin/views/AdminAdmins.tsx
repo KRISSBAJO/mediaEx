@@ -64,8 +64,8 @@ export default function AdminAdmins() {
             <p className="access-note aspace">They need a MediaEX account first. Admins added here can be removed here; the ones in SITE_ADMIN_EMAILS can only be removed by changing that setting.</p>
           </Card>
           {data.pending.length > 0 && (
-            <Card title="Waiting to sign up" meta="In SITE_ADMIN_EMAILS">
-              <p className="access-note">These become admins the moment they create an account: {data.pending.join(', ')}.</p>
+            <Card title="Waiting for email verification" meta="In SITE_ADMIN_EMAILS">
+              <p className="access-note">Site admin access requires a verified account for each address listed here: {data.pending.join(', ')}.</p>
             </Card>
           )}
         </div>
