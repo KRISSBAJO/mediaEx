@@ -11,9 +11,9 @@ export const metadata: Metadata = {
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   // account first: it settles the active workspace that the asset list is scoped to
   const account = await requireAccount()
-  const initialAssets = await getWorkspaceAssets()
+  const { assets, summary } = await getWorkspaceAssets()
   return (
-    <Shell account={account} initialAssets={initialAssets}>
+    <Shell account={account} initialAssets={assets} initialSummary={summary}>
       {children}
     </Shell>
   )
