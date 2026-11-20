@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import type { EncodingSettings, ExtraCodec } from '@/lib/media/types'
 import { canManage, useAccount } from '../account'
 import { request } from '../library'
-import { Card, toast } from '../ui'
+import { Card, LoadFailed, toast } from '../ui'
 
 const CODECS: { value: ExtraCodec; title: string; text: string }[] = [
   {
@@ -30,6 +30,7 @@ export default function SettingsEncoding() {
   const [pick, setPick] = useState<ExtraCodec[]>([])
   const [auto, setAuto] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState('')
 
   useEffect(() => {
     request<EncodingSettings>('/api/encoding')
@@ -38,9 +39,10 @@ export default function SettingsEncoding() {
         setPick(x.extraCodecs)
         setAuto(x.autoCaptions)
       })
-      .catch((e) => toast(e instanceof Error ? e.message : 'Couldn’t load encoding settings.'))
+      .catch((e) => setFailed(e instanceof Error ? e.message : 'Couldn’t load encoding settings.'))
   }, [])
 
+  if (failed) return <LoadFailed what="encoding settings" detail={failed} />
   if (!s) return <p className="quiet-note">Loading…</p>
   const dirty = [...pick].sort().join() !== [...s.extraCodecs].sort().join() || auto !== s.autoCaptions
 

@@ -11,7 +11,7 @@
  * Needs `ffmpeg` and `ffprobe` on PATH (or FFMPEG_PATH / FFPROBE_PATH).
  */
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pool } from '../auth.mts'
@@ -240,6 +240,16 @@ export async function encodeLadder(
   }
 }
 
+/** Length of an HLS media playlist: the sum of its segment durations. */
+async function playlistSeconds(file: string) {
+  try {
+    const text = await readFile(file, 'utf8')
+    return [...text.matchAll(/^#EXTINF:([\d.]+)/gm)].reduce((t, m) => t + Number(m[1]), 0)
+  } catch {
+    return 0
+  }
+}
+
 async function dirSize(dir: string): Promise<number> {
   let total = 0
   for (const e of await readdir(dir, { withFileTypes: true })) {
@@ -362,12 +372,18 @@ async function processAsset(job: AssetRow) {
     const thumbFile = path.join(out, path.basename(thumbKey))
     renditions.push({ name: 'Thumbnail', codec: info.type === 'audio' ? 'PNG' : 'JPEG', width: info.type === 'audio' ? 1280 : Math.min(640, info.width ?? 640), size: (await stat(thumbFile)).size })
 
+    // some files don't state their length (WebM from a browser's MediaRecorder, live-cut MKV): measure what we encoded
+    if (!info.duration && playlistKey) {
+      const first = info.type === 'video' ? path.join(out, 'hls', 'v0', 'index.m3u8') : path.join(out, 'hls', 'a', 'index.m3u8')
+      info.duration = Math.round((await playlistSeconds(first)) * 1000) / 1000
+    }
+
     // 3 · Package
     await update(job.id, { stage: 3, progress: 95 })
     const outputSize = await dirSize(out)
     await publish()
     await update(job.id, {
-      status: 'ready', stage: 3, progress: 100, error: null, readyAt: new Date(),
+      status: 'ready', stage: 3, progress: 100, error: null, readyAt: new Date(), duration: info.duration,
       thumbKey, posterKey, playlistKey, playlists: JSON.stringify(playlists), renditions: JSON.stringify(renditions), outputSize,
     })
     // moderation: blocklist and optional automatic review decide whether it goes public
