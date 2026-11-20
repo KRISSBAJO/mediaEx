@@ -253,3 +253,11 @@ create table if not exists "asset_variant" (
   primary key ("assetId", "key")
 );
 `
+
+/** Match the Library's stable sort tuples in both directions. Applied after recovery adds deletedAt. */
+export const LIBRARY_INDEXES = /* sql */ `
+create index if not exists asset_page_created on asset ("organizationId", "createdAt" desc, id desc) where "deletedAt" is null;
+create index if not exists asset_page_name on asset ("organizationId", lower(title), "createdAt" desc, id desc) where "deletedAt" is null;
+create index if not exists asset_page_size on asset ("organizationId", size desc, id desc) where "deletedAt" is null;
+create index if not exists asset_page_duration on asset ("organizationId", duration desc, "createdAt" desc, id desc) where "deletedAt" is null;
+`

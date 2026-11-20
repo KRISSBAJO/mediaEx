@@ -27,23 +27,28 @@
  *
  * The frontend forwards these paths unchanged (see app/api/*).
  */
+import { recovery, trashAssets } from './recovery.mts'
+import type { PoolClient } from 'pg'
 import { pool } from '../auth.mts'
 import { guessType, normaliseTag, parseQuery } from './types.mts'
-import { MAX_UPLOAD_BYTES, SINGLE_PUT_BYTES, HttpError, apiAsset, getAssetRow, handle, isMemberOf, newAssetId, prefixOf, searchAssets, toDTO, type AssetRow } from './assets.mts'
+import { assetPage, searchAssets, workspaceAssetSummary } from './asset-search.mts'
+import { MAX_UPLOAD_BYTES, SINGLE_PUT_BYTES, HttpError, apiAsset, getAssetRow, handle, isMemberOf, newAssetId, prefixOf, toDTO, type AssetRow } from './assets.mts'
 import { handleKeys, sessionActor, type Actor } from './keys.mts'
 import { emitAsset, handleWebhooks } from './webhooks.mts'
 import { mergeMetadata, handleFields } from './fields.mts'
 import { handleModeration, initialModeration, isPublic } from './moderation.mts'
 import { bulk, handleLibrary } from './library.mts'
-import { isLocal, storage } from './storage.mts'
+import { isLocal, storage, storageForWorkspace, type DeliveryAccess } from './storage.mts'
 import { transform } from './transform.mts'
 import { kickWorker } from './worker.mts'
 import { apiBase, handleV1 } from './v1.mts'
 import { analyticsFor, recordBeat } from './analytics.mts'
+import { handleOperations } from './operations.mts'
 import { handleEncoding } from './encoding.mts'
 import { captionKey, handleCaptions } from './captions.mts'
-import { assertMinutes, assertStorage, handleBilling } from './billing.mts'
-import { PLAYBACK_POLICIES, handlePlayback, playbackLinks, tokenOf, tokenUrl, tokenisePlaylist, ttlFrom, verifyPlayback, type PlaybackPolicy } from './playback.mts'
+import { assertMinutes, assertStorage, handleBilling, planOf } from './billing.mts'
+import { checkUploadPolicy, choosePreset, handlePresets, inWorkspaceTransaction } from './presets.mts'
+import { PLAYBACK_POLICIES, handlePlayback, playbackLinks, tokenOf, tokenUrl, tokenisePlaylist, ttlFrom, verifiedPlaybackExpiry, type PlaybackPolicy } from './playback.mts'
 
 const SAFE_REL = /^[A-Za-z0-9_-][A-Za-z0-9._/-]*$/
 const noStore = { 'Cache-Control': 'no-store' }
@@ -53,8 +58,8 @@ async function body<T>(req: Request) {
 }
 
 /** Uploads need storage that survives a redeploy. In production, refuse them unless a bucket or a mounted MEDIA_DIR is set. */
-function assertDurableStorage() {
-  if (process.env.NODE_ENV === 'production' && !isDurable()) {
+function assertDurableStorage(kind: 'local' | 's3') {
+  if (process.env.NODE_ENV === 'production' && kind === 'local' && !process.env.MEDIA_DIR) {
     throw new HttpError(503, 'Media storage isn’t configured on the server yet, so uploads are turned off.')
   }
 }
@@ -66,15 +71,21 @@ export const dtoFor = (a: Actor, row: AssetRow) => (a.via === 'key' ? apiAsset(r
 
 async function listAll(req: Request) {
   const { orgId } = await sessionActor(req.headers)
-  const query = parseQuery(new URL(req.url).searchParams)
-  return Response.json({ assets: (await searchAssets(orgId, query)).map(toDTO) }, { headers: noStore })
+  const params = new URL(req.url).searchParams
+  const query = parseQuery(params)
+  if (params.get('view') === 'page') return Response.json(await assetPage(orgId, query, params), { headers: noStore })
+  const [rows, summary] = await Promise.all([
+    searchAssets(orgId, query),
+    params.get('view') === 'recent' ? workspaceAssetSummary(orgId) : null,
+  ])
+  return Response.json({ assets: rows.map(toDTO), ...(summary && { summary }) }, { headers: noStore })
 }
 
 /** A folder id from a request, checked to belong to the workspace (null = no folder). */
-async function folderOf(orgId: string, v: unknown) {
+async function folderOf(orgId: string, v: unknown, db: Pick<typeof pool, 'query'> = pool) {
   if (v === null || v === undefined || v === '') return null
   if (typeof v !== 'string' || !/^fld_[a-z0-9]{4,24}$/.test(v)) throw new HttpError(404, 'That folder doesn’t exist.')
-  const { rows } = await pool.query('select id from "folder" where id = $1 and "organizationId" = $2', [v, orgId])
+  const { rows } = await db.query('select id from "folder" where id = $1 and "organizationId" = $2', [v, orgId])
   if (!rows[0]) throw new HttpError(404, 'That folder doesn’t exist.')
   return v
 }
@@ -99,18 +110,21 @@ export async function one(a: Actor, req: Request, id: string) {
     const folderId = b?.folderId === undefined ? row.folderId : await folderOf(orgId, b.folderId)
     const metadata = b?.metadata === undefined ? row.metadata : await mergeMetadata(orgId, row.metadata ?? {}, b.metadata)
     if (b?.playback !== undefined && !PLAYBACK_POLICIES.includes(b.playback as PlaybackPolicy)) throw new HttpError(400, 'playback must be "public" or "signed".')
-    const playback = (b?.playback as PlaybackPolicy | undefined) ?? row.playback
-    await pool.query(`update "asset" set title = $2, tags = $3, "folderId" = $4, metadata = $5, playback = $6, "updatedAt" = now() where id = $1`, [
-      id, title, tags, folderId, JSON.stringify(metadata), playback,
+    if (b?.playback === 'public' && row.uploadPolicy?.playback === 'signed') throw new HttpError(409, 'This upload preset requires signed playback.')
+    const change = await pool.query(`update asset set title=coalesce($2,title), tags=coalesce($3,tags),
+      "folderId"=case when $4 then $5 else "folderId" end, metadata=coalesce($6,metadata), playback=coalesce($7,playback),
+      "updatedAt"=now() where id=$1 and "deletedAt" is null and "revisionId"=$8`, [
+      id, b?.title === undefined ? null : title, b?.tags === undefined ? null : tags, b?.folderId !== undefined, folderId,
+      b?.metadata === undefined ? null : JSON.stringify(metadata), b?.playback ?? null, row.revisionId,
     ])
-    return Response.json({ asset: dtoFor(a, (await getAssetRow(id, orgId))!) })
+    if (!change.rowCount) throw new HttpError(409, 'The asset changed. Refresh and try again.')
+    const updated = await getAssetRow(id, orgId)
+    if (!updated) throw new HttpError(404, 'Asset unavailable.')
+    return Response.json({ asset: dtoFor(a, updated) })
   }
 
   if (req.method === 'DELETE') {
-    await emitAsset(row, 'asset.deleted') // queued before the row goes, so the payload still has the asset
-    await pool.query(`delete from "asset" where id = $1`, [id])
-    if (row.upload) await storage().multipartAbort(row.originalKey, row.upload.uploadId).catch(() => {})
-    await storage().removePrefix(prefixOf(row))
+    await trashAssets(a, [id])
     return new Response(null, { status: 204 })
   }
   throw new HttpError(405, 'Method not allowed')
@@ -121,10 +135,19 @@ export async function retry(a: Actor, id: string) {
   const row = await getAssetRow(id, orgId)
   if (!row) throw new HttpError(404, 'That asset doesn’t exist in this workspace.')
   if (row.status !== 'ready' && row.status !== 'failed') throw new HttpError(409, 'This asset is still being processed.')
-  await pool.query(`update "asset" set status = 'queued', stage = 1, progress = 0, error = null, attempts = 0, "updatedAt" = now() where id = $1`, [id])
-  // cached transformations were made from the old outputs: start fresh
-  await pool.query(`delete from "asset_variant" where "assetId" = $1`, [id])
-  await storage().removePrefix(`${prefixOf(row)}/derived`)
+  const client = await pool.connect()
+  try {
+    await client.query('begin')
+    const queued = await client.query(`update asset set status='queued', stage=1, progress=0, error=null, attempts=0, "updatedAt"=now()
+      where id=$1 and "revisionId"=$2 and "deletedAt" is null and status in ('ready','failed')`, [id,row.revisionId])
+    if (!queued.rowCount) throw new HttpError(409, 'The asset changed. Refresh before retrying.')
+    await client.query('delete from asset_variant where "assetId"=$1', [id])
+    await storage(row).removePrefix(`${prefixOf(row)}/derived`)
+    await client.query('commit')
+  } catch (e) {
+    await client.query('rollback')
+    throw e
+  } finally { client.release() }
   kickWorker()
   return Response.json({ asset: dtoFor(a, (await getAssetRow(id, orgId))!) })
 }
@@ -142,54 +165,105 @@ export async function playbackToken(a: Actor, req: Request, id: string) {
 export async function captions(a: Actor, req: Request, id: string, lang?: string) {
   const row = await getAssetRow(id, a.orgId)
   if (!row) throw new HttpError(404, 'That asset doesn’t exist in this workspace.')
-  return handleCaptions(req, row, lang, a.via === 'key')
+  if (req.method === 'GET') return handleCaptions(req, row, lang, a.via === 'key')
+  const client = await pool.connect()
+  try {
+    await client.query('begin')
+    const locked = await client.query('select id from asset where id=$1 and "revisionId"=$2 and "deletedAt" is null for share', [id,row.revisionId])
+    if (!locked.rowCount) throw new HttpError(409, 'The asset changed. Refresh before editing captions.')
+    const response = await handleCaptions(req, row, lang, a.via === 'key', client)
+    await client.query('commit')
+    return response
+  } catch (e) {
+    await client.query('rollback')
+    throw e
+  } finally { client.release() }
 }
 
 /* ------------------------------------------------ uploads */
 export async function startUpload(a: Actor, req: Request) {
   const { orgId } = a
-  assertDurableStorage()
-  const b = await body<{ fileName?: unknown; size?: unknown; mimeType?: unknown; folderId?: unknown; multipart?: unknown }>(req)
+  const store = storageForWorkspace(orgId)
+  assertDurableStorage(store.kind)
+  const b = await body<{ fileName?: unknown; size?: unknown; mimeType?: unknown; folderId?: unknown; presetId?: unknown; multipart?: unknown }>(req)
   const fileName = typeof b?.fileName === 'string' ? b.fileName.trim().slice(0, 255) : ''
-  const size = typeof b?.size === 'number' ? Math.floor(b.size) : 0
+  const size = typeof b?.size === 'number' ? b.size : 0
   const mimeType = typeof b?.mimeType === 'string' ? b.mimeType.slice(0, 120) : null
   if (!fileName) throw new HttpError(400, 'The file needs a name.')
-  if (size <= 0) throw new HttpError(400, `${fileName} is empty.`)
+  if (!Number.isSafeInteger(size) || size <= 0) throw new HttpError(400, `${fileName} is empty.`)
   if (size > MAX_UPLOAD_BYTES) throw new HttpError(413, `${fileName} is larger than the ${Math.round(MAX_UPLOAD_BYTES / 1024 ** 3)} GB limit.`)
   const type = guessType(fileName, mimeType)
   if (!type) throw new HttpError(415, `${fileName} isn’t a video, audio or image file MediaEX can process.`)
-  await assertStorage(orgId, size)
-
-  const folderId = await folderOf(orgId, b?.folderId)
+  const [planId, moderation] = await Promise.all([planOf(orgId), initialModeration(orgId)])
   const id = newAssetId()
   const ext = /\.([a-z0-9]{1,8})$/i.exec(fileName)?.[1]?.toLowerCase()
   const originalKey = `${orgId}/${id}/original${ext ? `.${ext}` : ''}`
   const title = fileName.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim() || fileName
-  await pool.query(
-    `insert into "asset" (id, "organizationId", "createdBy", "uploadedVia", title, type, status, "fileName", "mimeType", size, "originalKey", "folderId", moderation)
-     values ($1, $2, $3, $4, $5, $6, 'uploading', $7, $8, $9, $10, $11, $12)`,
-    [id, orgId, a.userId, a.via === 'key' ? `API key: ${a.keyName}` : null, title, type, fileName, mimeType, size, originalKey, folderId, await initialModeration(orgId)],
-  )
-  // big files, and anyone who asks, upload in parts: each part can be retried, and an interrupted upload resumed
-  if (b?.multipart === true || size > SINGLE_PUT_BYTES) {
-    const partSize = partSizeFor(size)
-    const plan = { uploadId: await storage().multipartStart(originalKey), partSize, partCount: Math.ceil(size / partSize) }
-    await pool.query(`update "asset" set upload = $2 where id = $1`, [id, JSON.stringify(plan)])
-    const base = a.via === 'key' ? `${apiBase()}/api/v1` : '/api'
-    return Response.json(
-      { asset: dtoFor(a, (await getAssetRow(id, orgId))!), upload: { kind: 'multipart', partSize, partCount: plan.partCount, parts: `${base}/uploads/${id}/parts` } },
-      { status: 201 },
+  const row = await inWorkspaceTransaction(orgId, async client => {
+    const preset = await choosePreset(client, orgId, b?.presetId)
+    const policy = preset?.policy ?? null
+    checkUploadPolicy(policy, type, size)
+    const folderId = await folderOf(orgId, preset ? preset.folderId : b?.folderId, client)
+    await assertStorage(client, orgId, size, planId)
+    const result = await client.query<AssetRow>(
+      `insert into asset (id,"organizationId","createdBy","uploadedVia",title,type,status,"fileName","mimeType",size,
+        "originalKey","folderId",moderation,playback,"uploadPolicy","uploadExpiresAt","storageBackend")
+       values ($1,$2,$3,$4,$5,$6,'uploading',$7,$8,$9,$10,$11,$12,$13,$14,now()+interval '7 days',$15) returning *`,
+      [id, orgId, a.userId, a.via === 'key' ? `API key: ${a.keyName}` : null, title, type, fileName, mimeType, size,
+       originalKey, folderId, policy ? 'pending' : moderation, policy?.playback ?? 'public', policy, store.kind],
     )
+    return result.rows[0]
+  })
+  let uploadId: string | undefined
+  try {
+    if (b?.multipart === true || size > SINGLE_PUT_BYTES) {
+      const partSize = partSizeFor(size)
+      uploadId = await store.multipartStart(originalKey)
+      const plan = { uploadId, partSize, partCount: Math.ceil(size / partSize) }
+      await pool.query('update asset set upload = $2 where id = $1', [id, JSON.stringify(plan)])
+      const base = a.via === 'key' ? `${apiBase()}/api/v1` : '/api'
+      return Response.json({ asset: dtoFor(a, row), upload: { kind: 'multipart', partSize, partCount: plan.partCount, parts: `${base}/uploads/${id}/parts` } }, { status: 201 })
+    }
+    const upload = { kind: 'single', ...(await store.uploadTarget(originalKey, id, size)) }
+    if (a.via === 'key' && upload.url.startsWith('/')) upload.url = `${apiBase()}/api/v1/uploads/${id}`
+    return Response.json({ asset: dtoFor(a, row), upload }, { status: 201 })
+  } catch (error) {
+    if (uploadId !== undefined) await store.multipartAbort(originalKey, uploadId)
+    await pool.query("delete from asset where id=$1 and status='uploading'", [id])
+    throw error
   }
-  const row = await getAssetRow(id, orgId)
-  const upload = { kind: 'single' as const, ...(await storage().uploadTarget(originalKey, id)) }
-  // local disk: key callers send the file to the v1 route, with their key, at an absolute URL
-  if (a.via === 'key' && upload.url.startsWith('/')) upload.url = `${apiBase()}/api/v1/uploads/${id}`
-  return Response.json({ asset: dtoFor(a, row!), upload }, { status: 201 })
+}
+
+async function renewUpload(row: AssetRow) {
+  // All provider signing lifetimes fit inside this renewed reservation window.
+  await inWorkspaceTransaction(row.organizationId, async db => {
+    const result = await db.query(`update asset set "uploadExpiresAt"=clock_timestamp()+interval '7 days'
+      where id=$1 and "organizationId"=$2 and status='uploading' and "deletedAt" is null
+        and coalesce("uploadExpiresAt", "createdAt"+interval '7 days')>clock_timestamp() returning id`, [row.id, row.organizationId])
+    if (!result.rowCount) throw new HttpError(410, 'This upload session has ended. Start a new upload.')
+  })
+}
+
+// Hold a shared row lock during local part writes, and an exclusive lock while joining or queuing.
+// Cleanup and cancellation wait for an in-flight write before removing its storage.
+async function withUploadLock<T>(row: AssetRow, shared: boolean, run: (db: PoolClient) => Promise<T>) {
+  const db = await pool.connect()
+  try {
+    await db.query('begin')
+    const lock = shared ? 'for share' : 'for update'
+    const active = await db.query(`select id from asset where id=$1 and "organizationId"=$2 and "deletedAt" is null
+      and status='uploading' and "uploadExpiresAt">now() ${lock}`, [row.id, row.organizationId])
+    if (!active.rowCount) throw new HttpError(409, 'This upload session has ended.')
+    const result = await run(db)
+    await db.query('commit')
+    return result
+  } catch (error) {
+    await db.query('rollback')
+    throw error
+  } finally { db.release() }
 }
 
 const MiB = 1024 ** 2
-/** at least 16 MiB, and few enough parts to stay under the 10,000-part limit of S3 */
 const partSizeFor = (size: number) => Math.max(16 * MiB, Math.ceil(size / 9000 / MiB) * MiB)
 const partLength = (size: number, plan: NonNullable<AssetRow['upload']>, n: number) => (n < plan.partCount ? plan.partSize : size - plan.partSize * (plan.partCount - 1))
 
@@ -197,13 +271,14 @@ async function inParts(a: Actor, id: string) {
   const row = await getAssetRow(id, a.orgId)
   if (!row) throw new HttpError(404, 'That upload doesn’t exist.')
   if (row.status !== 'uploading' || !row.upload) throw new HttpError(409, row.status === 'uploading' ? 'This upload isn’t in parts.' : 'This file has already been uploaded.')
+  await renewUpload(row)
   return { row, plan: row.upload }
 }
 
 /** GET: what has arrived (to resume) · POST { numbers }: where to send those parts */
 export async function uploadParts(a: Actor, req: Request, id: string) {
   const { row, plan } = await inParts(a, id)
-  const store = storage()
+  const store = storage(row)
   if (req.method === 'GET') {
     const stored = await store.listParts(row.originalKey, plan.uploadId)
     const size = Number(row.size)
@@ -220,7 +295,7 @@ export async function uploadParts(a: Actor, req: Request, id: string) {
   const size = Number(row.size)
   const parts = await Promise.all(
     (numbers as number[]).map(async (n) => {
-      const t = await store.partTarget(row.originalKey, plan.uploadId, n, id)
+      const t = await store.partTarget(row.originalKey, plan.uploadId, n, id, partLength(size, plan, n))
       if (t.url.startsWith('/') && a.via === 'key') t.url = `${apiBase()}/api/v1/uploads/${id}/parts/${n}`
       return { number: n, size: partLength(size, plan, n), ...t }
     }),
@@ -231,13 +306,15 @@ export async function uploadParts(a: Actor, req: Request, id: string) {
 /** PUT one part (local-disk storage only; buckets take parts directly) */
 export async function receivePart(a: Actor, req: Request, id: string, n: number) {
   const { row, plan } = await inParts(a, id)
-  const store = storage()
+  const store = storage(row)
   if (!isLocal(store)) throw new HttpError(400, 'Upload parts to the URLs you were given instead.')
   if (!Number.isInteger(n) || n < 1 || n > plan.partCount) throw new HttpError(404, 'That part doesn’t exist.')
   if (!req.body) throw new HttpError(400, 'No data was sent.')
   const expected = partLength(Number(row.size), plan, n)
   try {
-    return Response.json({ number: n, received: await store.writePart(row.originalKey, n, req.body, expected) })
+    const stream = req.body
+    const received = await withUploadLock(row, true, () => store.writePart(row.originalKey, n, stream, expected))
+    return Response.json({ number: n, received })
   } catch (e) {
     if (e instanceof Error && (e.message === 'UPLOAD_TOO_LARGE' || e.message === 'PART_SHORT')) throw new HttpError(400, `Part ${n} must be exactly ${expected} bytes.`)
     throw e
@@ -249,12 +326,15 @@ export async function receiveUpload(a: Actor, req: Request, id: string) {
   const row = await getAssetRow(id, orgId)
   if (!row) throw new HttpError(404, 'That upload doesn’t exist.')
   if (row.status !== 'uploading') throw new HttpError(409, 'This file has already been uploaded.')
-  const store = storage()
+  await renewUpload(row)
+  const store = storage(row)
   if (!isLocal(store)) throw new HttpError(400, 'Upload to the storage URL you were given instead.')
   if (row.upload) throw new HttpError(409, 'This upload goes in parts. PUT each part to its own URL.')
   if (!req.body) throw new HttpError(400, 'No file was sent.')
   try {
-    return Response.json({ received: await store.write(row.originalKey, req.body, Number(row.size)) })
+    const stream = req.body
+    const received = await withUploadLock(row, false, () => store.write(row.originalKey, stream, Number(row.size)))
+    return Response.json({ received })
   } catch (e) {
     if (e instanceof Error && e.message === 'UPLOAD_TOO_LARGE') throw new HttpError(413, 'The file is bigger than announced.')
     throw e
@@ -266,24 +346,32 @@ export async function completeUpload(a: Actor, id: string) {
   const row = await getAssetRow(id, orgId)
   if (!row) throw new HttpError(404, 'That upload doesn’t exist.')
   if (row.status !== 'uploading') return Response.json({ asset: dtoFor(a, row) })
-  if (row.upload) {
-    const plan = row.upload
-    const size = Number(row.size)
-    const stored = await storage().listParts(row.originalKey, plan.uploadId)
-    const byNumber = new Map(stored.map((p) => [p.number, p]))
-    const missing = Array.from({ length: plan.partCount }, (_, i) => i + 1).filter((n) => byNumber.get(n)?.size !== partLength(size, plan, n))
-    if (missing.length) {
-      const list = missing.length > 6 ? `${missing.slice(0, 6).join(', ')} and ${missing.length - 6} more` : missing.join(', ')
-      throw new HttpError(400, `Part${missing.length > 1 ? 's' : ''} ${list} ${missing.length > 1 ? 'haven’t' : 'hasn’t'} arrived yet. Send ${missing.length > 1 ? 'them' : 'it'}, then complete again.`)
-    }
-    await storage().multipartComplete(row.originalKey, plan.uploadId, Array.from({ length: plan.partCount }, (_, i) => byNumber.get(i + 1)!))
-    await pool.query(`update "asset" set upload = null where id = $1`, [id])
-  }
-  const stored = await storage().size(row.originalKey)
-  if (stored === null) throw new HttpError(400, 'The file never arrived. Try uploading it again.')
-  if (stored !== Number(row.size)) throw new HttpError(400, `Only ${stored} of ${row.size} bytes arrived. Try uploading it again.`)
   await assertMinutes(orgId)
-  await pool.query(`update "asset" set status = 'queued', stage = 1, progress = 0, "updatedAt" = now() where id = $1`, [id])
+  try {
+    await renewUpload(row)
+    await withUploadLock(row, false, async db => {
+      const store = storage(row)
+      const size = Number(row.size)
+      let stored = await store.size(row.originalKey)
+      if (row.upload && stored !== size) {
+        const plan = row.upload
+        const parts = new Map((await store.listParts(row.originalKey, plan.uploadId)).map(p => [p.number, p]))
+        const ordered = Array.from({length: plan.partCount}, (_, i) => parts.get(i + 1))
+        if (ordered.some((p, i) => !p || p.size !== partLength(size, plan, i + 1))) throw new HttpError(400, 'Some upload parts are missing or incomplete. Resume the upload and try again.')
+        await store.multipartComplete(row.originalKey, plan.uploadId, ordered.map(p => p!))
+        stored = await store.size(row.originalKey)
+      }
+      if (stored === null) throw new HttpError(400, 'The file never arrived. Try uploading it again.')
+      if (stored !== size) throw new HttpError(400, `Only ${stored} of ${size} bytes arrived. Try uploading it again.`)
+      await db.query(`update asset set status='queued', stage=1, progress=0, upload=null, "uploadExpiresAt"=null, "updatedAt"=now() where id=$1`, [id])
+    })
+  } catch (error) {
+    if (error instanceof HttpError && (error.status === 409 || error.status === 410)) {
+      const latest = await getAssetRow(id, orgId)
+      if (latest && latest.status !== 'uploading') return Response.json({ asset: dtoFor(a, latest) })
+    }
+    throw error
+  }
   kickWorker()
   return Response.json({ asset: dtoFor(a, (await getAssetRow(id, orgId))!) })
 }
@@ -296,9 +384,14 @@ async function media(req: Request, id: string, rel: string) {
   const isMember = async () => (member ??= await isMemberOf(req.headers, row.organizationId))
   // a valid playback token travels on to everything the player loads next
   const token = tokenOf(req)
-  const passToken = token && (await verifyPlayback(row, token)) ? token : null
-  // members see everything; everyone else needs it approved and, for signed assets, a valid token
-  const canView = async () => (isPublic(row) && (row.playback !== 'signed' || passToken !== null)) || (await isMember())
+  const expiresAt = await verifiedPlaybackExpiry(row, token)
+  const passToken = expiresAt === null ? null : token
+  let access: DeliveryAccess = 'member'
+  if (isPublic(row) && (!row.uploadPolicy || row.status === 'ready')) {
+    if (expiresAt !== null) access = { expiresAt }
+    else if (row.playback !== 'signed') access = 'public'
+  }
+  const canView = async () => access !== 'member' || (await isMember())
 
   if (rel === 'info') {
     if (!(await canView())) return Response.json({ error: 'Not found' }, { status: 404 })
@@ -314,12 +407,15 @@ async function media(req: Request, id: string, rel: string) {
     }
     return Response.json(info, { headers: noStore })
   }
-  if (rel === 'transform') return transform(req, id, canView, () => isMember())
+  if (rel === 'transform') {
+    if (!(await canView())) return new Response(null, { status: 404, headers: noStore })
+    return transform(req, row, access, isMember)
+  }
   const cc = /^captions\/([a-z]{2,3}(?:-[A-Z]{2})?)\.vtt$/.exec(rel)
   if (cc) {
     const key = await captionKey(row.id, cc[1])
     if (!key || !(await canView())) return new Response('Not found', { status: 404 })
-    const res = await storage().serve(key, req)
+    const res = await storage(row).serve(key, req, { access })
     res.headers.set('Access-Control-Allow-Origin', '*')
     return res
   }
@@ -330,16 +426,16 @@ async function media(req: Request, id: string, rel: string) {
   }
   if (rel === 'original') {
     if (!(await isMember())) return new Response('Not found', { status: 404 })
-    return storage().serve(row.originalKey, req, { download: row.fileName })
+    return storage(row).serve(row.originalKey, req, { access: 'member', download: row.fileName })
   }
   const publicFile = rel === 'thumb.jpg' || rel === 'thumb.png' || rel === 'poster.jpg' || (rel.startsWith('hls/') && row.status === 'ready')
   if (!publicFile || !SAFE_REL.test(rel) || rel.split('/').includes('..')) return new Response('Not found', { status: 404 })
   if (!(await canView())) return new Response('Not found', { status: 404 })
-  let res = await storage().serve(`${prefixOf(row)}/${rel}`, req)
-  if (passToken && rel.endsWith('.m3u8') && res.ok) {
+  let res = await storage(row).serve(`${prefixOf(row)}/${rel}`, req, { access })
+  if (passToken && typeof access === 'object' && req.method !== 'HEAD' && rel.endsWith('.m3u8') && res.ok) {
     // segments and nested playlists are fetched next, without the page's query string: hand them the token
     res = new Response(tokenisePlaylist(await res.text(), passToken), {
-      headers: { 'Content-Type': res.headers.get('content-type') ?? 'application/vnd.apple.mpegurl', 'Cache-Control': 'private, no-cache' },
+      headers: { 'Content-Type': res.headers.get('content-type') ?? 'application/vnd.apple.mpegurl', 'Cache-Control': 'private, no-store' },
     })
   }
   res.headers.set('Access-Control-Allow-Origin', '*') // players on other sites may load the stream
@@ -352,14 +448,17 @@ export async function handleMedia(req: Request, pathname: string): Promise<Respo
   const parts = pathname.split('/').filter(Boolean) // ['api', 'assets', ...]
   if (parts[0] !== 'api' || !['assets', 'uploads', 'media', 'folders', 'collections', 'tags', 'searches', 'fields', 'moderation', 'keys', 'webhooks', 'v1', 'playback', 'analytics', 'encoding', 'billing'].includes(parts[1])) return null
   if (parts[1] === 'v1') return handleV1(req, parts)
+  if (parts[1] === 'uploads' && parts[2] === 'presets' && parts.length <= 4) return handle(() => handlePresets(req, parts[3]))
   if (parts[1] === 'playback') return handle(() => handlePlayback(req, parts))
   if (parts[1] === 'encoding' && parts.length === 2) return handle(() => handleEncoding(req))
+  if (parts[1] === 'analytics' && parts[2] === 'operations' && parts.length === 3) return handle(() => handleOperations(req))
   if (parts[1] === 'billing' && parts.length <= 4) return handle(() => handleBilling(req, parts))
   if (parts[1] === 'keys' && parts.length <= 3) return handle(() => handleKeys(req, parts[2]))
   if (parts[1] === 'webhooks' && parts.length <= 5) return handle(() => handleWebhooks(req, parts))
   if (parts[1] === 'fields' && parts.length <= 3) return handle(() => handleFields(req, parts[2]))
   if (['folders', 'collections', 'tags', 'searches'].includes(parts[1])) return handle(() => handleLibrary(req, parts))
   if (parts[1] === 'moderation' && parts.length === 3) return handle(() => handleModeration(req, parts[2]))
+  if (parts[1] === 'assets' && parts[2] === 'trash' && parts.length === 3) return handle(async () => recovery(await sessionActor(req.headers), req, undefined, 'trash'))
   if (parts[1] === 'assets' && parts[2] === 'bulk' && parts.length === 3) return handle(() => bulk(req))
   let id: string | undefined
   try {
@@ -372,6 +471,7 @@ export async function handleMedia(req: Request, pathname: string): Promise<Respo
   return handle(async () => {
     if (parts[1] === 'assets') {
       if (!id && m === 'GET') return listAll(req)
+      if (id && parts.length === 4 && ['restore','revisions'].includes(parts[3])) return recovery(await sessionActor(req.headers), req, id, parts[3])
       if (id && parts.length === 3) return one(await sessionActor(req.headers), req, id)
       if (id && parts[3] === 'retry' && parts.length === 4 && m === 'POST') return retry(await sessionActor(req.headers), id)
       if (id && parts[3] === 'playback-token' && parts.length === 4 && m === 'POST') return playbackToken(await sessionActor(req.headers), req, id)

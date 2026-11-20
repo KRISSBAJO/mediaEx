@@ -13,7 +13,7 @@
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { baseURL, pool } from '../auth.mts'
-import { HttpError, requireMember, type AssetRow } from './assets.mts'
+import { HttpError, prefixOf, requireMember, type AssetRow } from './assets.mts'
 
 export type PlaybackPolicy = 'public' | 'signed'
 export const PLAYBACK_POLICIES: PlaybackPolicy[] = ['public', 'signed']
@@ -48,14 +48,15 @@ export async function signPlayback(orgId: string, assetId: string, ttl = DEFAULT
   return { token: `${exp}.${mac(await secretFor(orgId), assetId, exp)}`, expiresAt: new Date(exp * 1000).toISOString() }
 }
 
-export async function verifyPlayback(row: Pick<AssetRow, 'id' | 'organizationId'>, token: string | null | undefined) {
+/** Absolute expiry in Unix seconds, only after authenticating the asset-specific grant. */
+export async function verifiedPlaybackExpiry(row: Pick<AssetRow, 'id' | 'organizationId'>, token: string | null | undefined) {
   const m = token ? TOKEN.exec(token) : null
-  if (!m) return false
+  if (!m) return null
   const exp = Number(m[1])
-  if (exp < Date.now() / 1000) return false
+  if (exp <= Date.now() / 1000) return null
   const expected = Buffer.from(mac(await secretFor(row.organizationId), row.id, exp))
   const given = Buffer.from(m[2])
-  return expected.length === given.length && timingSafeEqual(expected, given)
+  return expected.length === given.length && timingSafeEqual(expected, given) && exp > Date.now() / 1000 ? exp : null
 }
 
 /** The token on a request, if any. */
@@ -110,7 +111,7 @@ export async function handlePlayback(req: Request, parts: string[]) {
 export async function playbackLinks(row: AssetRow, ttl: number | undefined, absolute: boolean) {
   const { token, expiresAt } = await signPlayback(row.organizationId, row.id, ttl ?? DEFAULT_TTL)
   const base = absolute ? baseURL : ''
-  const rel = (key: string | null) => (key ? `/api/media/${row.id}/${key.slice(`${row.organizationId}/${row.id}/`.length)}` : null)
+  const rel = (key: string) => `/api/media/${row.id}/${key.slice(prefixOf(row).length + 1)}`
   return {
     token,
     expiresAt,

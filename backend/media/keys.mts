@@ -27,7 +27,7 @@ function secret() {
 }
 
 /** Who is calling: a signed-in member (dashboard) or an API key (public API). */
-export type Actor = { orgId: string; userId: string | null; role: string; via: 'session' | 'key'; scope: KeyScope; keyName?: string }
+export type Actor = { orgId: string; userId: string | null; role: string; via: 'session' | 'key'; scope: KeyScope; keyName?: string; keyId?: string }
 
 export async function sessionActor(headers: Headers): Promise<Actor> {
   const m = await requireMember(headers)
@@ -69,7 +69,7 @@ export async function keyActor(req: Request): Promise<Actor> {
     lastUsedWrite.set(k.id, now)
     void pool.query('update "api_key" set "lastUsedAt" = now() where id = $1', [k.id])
   }
-  return { orgId: k.organizationId, userId: null, role: 'member', via: 'key', scope: k.scope, keyName: k.name }
+  return { orgId: k.organizationId, userId: null, role: 'member', via: 'key', scope: k.scope, keyName: k.name, keyId: k.id }
 }
 
 export function requireScope(actor: Actor, need: 'read' | 'upload' | 'full') {

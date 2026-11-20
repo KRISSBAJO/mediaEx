@@ -84,19 +84,20 @@ export function normaliseCaptions(text: string) {
 /* ------------------------------------------------ rows */
 type CaptionRow = { assetId: string; lang: string; label: string; source: 'auto' | 'upload'; status: 'queued' | 'processing' | 'ready' | 'failed'; error: string | null; key: string | null; attempts: number; updatedAt: Date }
 
-export async function listCaptions(assetId: string): Promise<CaptionTrack[]> {
-  const { rows } = await pool.query<CaptionRow>('select * from "caption" where "assetId" = $1 order by source, label', [assetId])
+export async function listCaptions(assetId: string, db: Pick<typeof pool, 'query'> = pool): Promise<CaptionTrack[]> {
+  const { rows } = await db.query<CaptionRow>('select * from "caption" where "assetId" = $1 order by source, label', [assetId])
   return rows.map((r) => ({ lang: r.lang, label: r.label, source: r.source, status: r.status, error: r.error, url: r.status === 'ready' ? `/api/media/${assetId}/captions/${r.lang}.vtt` : null }))
 }
 
 /** Queue an automatic transcription. `language` hints Whisper; otherwise it detects the language. */
-export async function queueCaptions(asset: Pick<AssetRow, 'id' | 'type'>, language?: string) {
+export async function queueCaptions(asset: Pick<AssetRow, 'id' | 'type' | 'originalKey'>, language?: string, db: Pick<typeof pool,'query'> = pool) {
   if (asset.type === 'image') return
   // the placeholder row is keyed "auto" until Whisper says which language it heard
-  await pool.query(
-    `insert into "caption" ("assetId", lang, label, source, status, hint) values ($1, 'auto', 'Transcribing…', 'auto', 'queued', $2)
+  await db.query(
+    `insert into "caption" ("assetId", lang, label, source, status, hint)
+     select id, 'auto', 'Transcribing…', 'auto', 'queued', $2 from (select id from asset where id=$1 and "originalKey"=$3 and "deletedAt" is null for share) active
      on conflict ("assetId", lang) do update set status = 'queued', error = null, attempts = 0, hint = excluded.hint, "updatedAt" = now()`,
-    [asset.id, language ?? null],
+    [asset.id, language ?? null, asset.originalKey],
   )
   kickCaptioner()
 }
@@ -144,7 +145,7 @@ async function transcribe(file: string, hint: string | null): Promise<{ language
 }
 
 async function processCaption(asset: AssetRow, hint: string | null) {
-  const store = storage()
+  const store = storage(asset)
   const scratch = await mkdtemp(path.join(os.tmpdir(), 'mediaex-cc-'))
   try {
     const input = await store.localCopy(asset.originalKey, scratch)
@@ -195,14 +196,16 @@ export function startCaptioner() {
         for (;;) {
           const { rows } = await pool.query<CaptionRow & { hint: string | null }>(
             `update "caption" set status = 'processing', attempts = attempts + 1, "updatedAt" = now()
-              where ("assetId", lang) = (select "assetId", lang from "caption" where status = 'queued' and "nextAttemptAt" <= now() order by "updatedAt" for update skip locked limit 1)
+              where ("assetId", lang) = (select c."assetId",c.lang from caption c join asset a on a.id=c."assetId"
+                where c.status='queued' and a.status='ready' and a."deletedAt" is null and c."nextAttemptAt"<=now()
+                order by c."updatedAt" limit 1 for update of c skip locked for share of a skip locked)
               returning *`,
           )
           const job = rows[0]
           if (!job) break
           const asset = await getAssetRow(job.assetId)
           if (!asset || asset.status !== 'ready') {
-            await pool.query('delete from "caption" where "assetId" = $1 and lang = $2', [job.assetId, job.lang])
+            await pool.query(`update caption set status='queued' where "assetId"=$1 and lang=$2`, [job.assetId, job.lang])
             continue
           }
           try {
@@ -236,10 +239,10 @@ export function kickCaptioner() {
 }
 
 /* ------------------------------------------------ routes */
-export async function handleCaptions(req: Request, row: AssetRow, lang?: string, absolute = false) {
+export async function handleCaptions(req: Request, row: AssetRow, lang?: string, absolute = false, db: Pick<typeof pool,'query'> = pool) {
   const m = req.method
   // API callers get absolute URLs
-  const out = async () => (await listCaptions(row.id)).map((c) => ({ ...c, url: c.url && absolute ? `${baseURL}${c.url}` : c.url }))
+  const out = async () => (await listCaptions(row.id, db)).map((c) => ({ ...c, url: c.url && absolute ? `${baseURL}${c.url}` : c.url }))
   if (!lang && m === 'GET') return Response.json({ captions: await out(), available: captionsAvailable() }, { headers: { 'Cache-Control': 'no-store' } })
   if (lang === 'generate' && m === 'POST') {
     if (!captionsAvailable()) throw new HttpError(400, 'Automatic captions need an OpenAI key on the server (OPENAI_API_KEY).')
@@ -247,7 +250,7 @@ export async function handleCaptions(req: Request, row: AssetRow, lang?: string,
     if (row.type === 'image') throw new HttpError(400, 'Images have nothing to caption.')
     const b = ((await req.json().catch(() => null)) ?? {}) as { language?: unknown }
     if (b.language !== undefined && (typeof b.language !== 'string' || !LANG.test(b.language))) throw new HttpError(400, 'language must be a code like “en” or “fr”.')
-    await queueCaptions(row, b.language as string | undefined)
+    await queueCaptions(row, b.language as string | undefined, db)
     return Response.json({ captions: await out() }, { status: 202 })
   }
   if (!lang || !LANG.test(lang)) throw new HttpError(404, 'Not found')
@@ -258,8 +261,8 @@ export async function handleCaptions(req: Request, row: AssetRow, lang?: string,
     const vtt = normaliseCaptions(b.text)
     const label = typeof b.label === 'string' && b.label.trim() ? b.label.trim().slice(0, 60) : languageLabel(lang)
     const key = `${prefixOf(row)}/captions/${lang}.vtt`
-    await storage().putBuffer(key, Buffer.from(vtt), 'text/vtt')
-    await pool.query(
+    await storage(row).putBuffer(key, Buffer.from(vtt), 'text/vtt')
+    await db.query(
       `insert into "caption" ("assetId", lang, label, source, status, key) values ($1, $2, $3, 'upload', 'ready', $4)
        on conflict ("assetId", lang) do update set label = excluded.label, source = 'upload', status = 'ready', key = excluded.key, error = null, "updatedAt" = now()`,
       [row.id, lang, label, key],
@@ -267,9 +270,9 @@ export async function handleCaptions(req: Request, row: AssetRow, lang?: string,
     return Response.json({ captions: await out() })
   }
   if (m === 'DELETE') {
-    const { rows } = await pool.query<{ key: string | null }>('delete from "caption" where "assetId" = $1 and lang = $2 returning key', [row.id, lang])
+    const { rows } = await db.query<{ key: string | null }>('delete from "caption" where "assetId" = $1 and lang = $2 returning key', [row.id, lang])
     if (!rows[0]) throw new HttpError(404, 'There’s no track in that language.')
-    if (rows[0].key) await storage().remove(rows[0].key).catch(() => {})
+    if (rows[0].key) await storage(row).remove(rows[0].key).catch(() => {})
     return new Response(null, { status: 204 })
   }
   throw new HttpError(405, 'Method not allowed')

@@ -17,6 +17,7 @@ import path from 'node:path'
 import { pool } from '../auth.mts'
 import { prefixOf, type AssetRow } from './assets.mts'
 import { reviewAsset } from './moderation.mts'
+import { checkProbedPolicy } from './presets.mts'
 import { emitAsset } from './webhooks.mts'
 import { encoderFor, extraCodecsFor, type Encoder } from './encoding.mts'
 import { captionsAfterReady } from './captions.mts'
@@ -117,7 +118,7 @@ function fps(rate?: string) {
   return n && d ? n / d : 0
 }
 
-function analyse(p: Probe, guessed: MediaType) {
+function analyse(p: Probe, guessed: MediaType | null) {
   const video = p.streams.find((s) => s.codec_type === 'video' && !s.disposition?.attached_pic)
   const audio = p.streams.find((s) => s.codec_type === 'audio')
   const duration = Number(p.format.duration ?? video?.duration ?? audio?.duration ?? 0) || 0
@@ -268,7 +269,7 @@ async function update(id: string, fields: Record<string, unknown>) {
 async function claim(): Promise<AssetRow | null> {
   const { rows } = await pool.query<AssetRow>(
     `update "asset" set status = 'processing', stage = 1, progress = 0, error = null, attempts = attempts + 1, "updatedAt" = now()
-      where id = (select id from "asset" where status = 'queued' order by "createdAt" for update skip locked limit 1)
+      where id = (select id from "asset" where status = 'queued' and "deletedAt" is null order by "createdAt" for update skip locked limit 1)
       returning *`,
   )
   return rows[0] ?? null
@@ -279,21 +280,29 @@ async function recoverStale() {
   await pool.query(
     `update "asset" set status = case when attempts >= ${MAX_ATTEMPTS} then 'failed' else 'queued' end,
        error = case when attempts >= ${MAX_ATTEMPTS} then 'Processing was interrupted too many times.' else null end, "updatedAt" = now()
-     where status = 'processing' and "updatedAt" < now() - interval '2 minutes'`,
+     where status = 'processing' and "deletedAt" is null and "updatedAt" < now() - interval '2 minutes'`,
   )
+}
+
+export async function inspectUpload(input: string, job: Pick<AssetRow, 'size' | 'uploadPolicy' | 'type'>) {
+  const inputBytes = (await stat(input)).size
+  if (inputBytes !== Number(job.size)) throw new Error('Stored bytes differ from the upload reservation.')
+  const probe = JSON.parse((await run(FFPROBE, ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', input])).stdout) as Probe
+  const info = analyse(probe, job.uploadPolicy ? null : job.type)
+  checkProbedPolicy(job.uploadPolicy, info, inputBytes)
+  return { info, inputBytes }
 }
 
 /* ------------------------------------------------ the pipeline */
 async function processAsset(job: AssetRow) {
-  const store = storage()
+  const store = storage(job)
   const prefix = prefixOf(job)
   const scratch = await mkdtemp(path.join(os.tmpdir(), 'mediaex-'))
   const t0 = Date.now()
   try {
     // 1 · Analyse
     const input = await store.localCopy(job.originalKey, scratch)
-    const probe = JSON.parse((await run(FFPROBE, ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', input])).stdout) as Probe
-    const info = analyse(probe, job.type)
+    const { info, inputBytes } = await inspectUpload(input, job)
     await update(job.id, { type: info.type, duration: info.duration, width: info.width, height: info.height, sourceInfo: info.sourceInfo, progress: 4 })
 
     const { dir: out, publish } = await store.outputDir(prefix, scratch)
@@ -328,7 +337,8 @@ async function processAsset(job: AssetRow) {
 
     const playlists: Partial<Record<ExtraCodec, string>> = {}
     if (info.type === 'video') {
-      const rungs = ladderFor(info.width!, info.height!, await maxShortSide(job.organizationId))
+      const ceiling = Math.min(await maxShortSide(job.organizationId), job.uploadPolicy?.maxShortSide ?? Infinity)
+      const rungs = ladderFor(info.width!, info.height!, ceiling)
       const codecs: Codec[] = ['h264', ...(await extraCodecsFor(job.organizationId))]
       const total = codecs.reduce((t, c) => t + EFFORT[c], 0)
       let at = 6
@@ -373,9 +383,12 @@ async function processAsset(job: AssetRow) {
     renditions.push({ name: 'Thumbnail', codec: info.type === 'audio' ? 'PNG' : 'JPEG', width: info.type === 'audio' ? 1280 : Math.min(640, info.width ?? 640), size: (await stat(thumbFile)).size })
 
     // some files don't state their length (WebM from a browser's MediaRecorder, live-cut MKV): measure what we encoded
-    if (!info.duration && playlistKey) {
+    if ((!info.duration || job.uploadPolicy?.maxDuration) && playlistKey) {
       const first = info.type === 'video' ? path.join(out, 'hls', 'v0', 'index.m3u8') : path.join(out, 'hls', 'a', 'index.m3u8')
-      info.duration = Math.round((await playlistSeconds(first)) * 1000) / 1000
+      const measured = Math.round((await playlistSeconds(first)) * 1000) / 1000
+      if (job.uploadPolicy?.maxDuration && !measured) throw new Error('The upload duration could not be verified.')
+      info.duration = measured || info.duration
+      checkProbedPolicy(job.uploadPolicy, info, inputBytes)
     }
 
     // 3 · Package

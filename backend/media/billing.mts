@@ -20,9 +20,11 @@
  * the encoding ladder, and HEVC/AV1 (paid plans).
  */
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import type { PoolClient } from 'pg'
 import { baseURL, pool } from '../auth.mts'
 import { HttpError, requireMember } from './assets.mts'
 import { encodingGuards } from './encoding.mts'
+import { committedStorage, processingMinutesForPeriod } from './operations.mts'
 import type { BillingInterval, BillingState, PlanId } from './types.mts'
 
 /* ------------------------------------------------ plans */
@@ -85,23 +87,21 @@ async function period(orgId: string) {
 
 export async function usage(orgId: string) {
   const { start, end } = await period(orgId)
-  const { rows } = await pool.query<{ stored: string; minutes: number }>(
-    `select coalesce(sum(size + "outputSize"), 0)::text as stored,
-            coalesce(sum(duration) filter (where "readyAt" >= $2 and "readyAt" < $3 and type <> 'image'), 0)::float / 60 as minutes
-       from "asset" where "organizationId" = $1`,
-    [orgId, start, end],
-  )
-  return { storageBytes: Number(rows[0].stored), minutes: rows[0].minutes, periodStart: start.toISOString(), periodEnd: end.toISOString() }
+  const [storageBytes, minutes] = await Promise.all([
+    committedStorage(orgId),
+    processingMinutesForPeriod(orgId, start, end),
+  ])
+  return { storageBytes, minutes, periodStart: start.toISOString(), periodEnd: end.toISOString() }
 }
 
 /* ------------------------------------------------ limits */
 const gb = (b: number) => (b >= 1e12 ? `${b / 1e12} TB` : `${Math.round(b / 1e9)} GB`)
 
 /** Before an upload starts: does it fit the plan's storage? */
-export async function assertStorage(orgId: string, adding: number) {
-  const plan = PLANS[await planOf(orgId)]
+export async function assertStorage(client: PoolClient, orgId: string, adding: number, planId: PlanId) {
+  const plan = PLANS[planId]
   if (plan.storageBytes === null) return
-  const { storageBytes } = await usage(orgId)
+  const storageBytes = await committedStorage(orgId, client)
   if (storageBytes + adding > plan.storageBytes) {
     throw new HttpError(402, `This would go past your ${plan.name} plan’s ${gb(plan.storageBytes)} of storage (${gb(storageBytes)} used). Upgrade, or delete something first.`)
   }
