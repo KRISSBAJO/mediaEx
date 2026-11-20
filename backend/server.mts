@@ -8,6 +8,7 @@ import { handleMedia, isDurable } from './media/routes.mts'
 import { storage } from './media/storage.mts'
 import { startWorker } from './media/worker.mts'
 import { startCaptioner } from './media/captions.mts'
+import { handleAdmin } from './admin.mts'
 import { startDispatcher } from './media/webhooks.mts'
 
 const frontend = new URL(baseURL)
@@ -87,6 +88,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   req.headers['x-forwarded-proto'] = frontend.protocol.slice(0, -1)
   res.setHeader('cache-control', 'no-store')
   if (pathname.startsWith('/api/auth/')) return await authHandler(req, res)
+  if (pathname === '/api/admin' || pathname.startsWith('/api/admin/')) return await sendWeb(res, await handleAdmin(toWebRequest(req, pathname), pathname.split('/').filter(Boolean)))
   if (/^\/api\/(assets|uploads|media|folders|collections|tags|searches|fields|moderation|keys|webhooks|v1|playback|analytics|encoding|billing)(\/|$)/.test(pathname)) {
     const response = await handleMedia(toWebRequest(req, pathname), pathname)
     if (response) return await sendWeb(res, response)

@@ -50,14 +50,26 @@ export async function getAccount(headers: Headers) {
     )
   }
   const plan = await planOf(active.id)
+  const { rows: susp } = await pool.query<{ suspendReason: string | null }>(
+    'select "suspendReason" from "workspace_admin" where "organizationId" = $1 and "suspendedAt" is not null',
+    [active.id],
+  )
+  const by = (session as { impersonatedBy?: string | null }).impersonatedBy
+  const impersonator = by ? (await pool.query<{ name: string; email: string }>('select name, email from "user" where id = $1', [by])).rows[0] : null
   const initials = user.name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('') || '?'
   return {
-    user: { id: user.id, name: user.name, email: user.email, emailVerified: user.emailVerified, initials },
+    user: {
+      id: user.id, name: user.name, email: user.email, emailVerified: user.emailVerified, initials,
+      // never an admin while someone is impersonating them
+      isAdmin: !by && ((user as { role?: string | null }).role ?? '').split(',').includes('admin'),
+    },
+    impersonation: impersonator ? { by: impersonator.name, byEmail: impersonator.email, expiresAt: new Date(session.expiresAt).toISOString() } : null,
     workspace: {
       ...summary(active),
       role: active.role.split(',')[0],
       createdAt: new Date(active.createdAt).toISOString(),
       plan: { id: plan, name: PLANS[plan].name, storageLimit: PLANS[plan].storageBytes ?? 10e12 },
+      suspended: susp[0] ? { reason: susp[0].suspendReason } : null,
     },
     workspaces: workspaces.map(summary),
   }

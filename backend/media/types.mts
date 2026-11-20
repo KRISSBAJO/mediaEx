@@ -49,6 +49,8 @@ export type MediaAsset = {
   moderationNote: string | null
   /** public: anyone with the link can watch; signed: viewers need a playback token (members never do) */
   playback: 'public' | 'signed'
+  /** a site admin took this asset down (the reason); only they can restore it */
+  takenDown: string | null
 }
 
 /* ------------------------------------------------ developer platform */

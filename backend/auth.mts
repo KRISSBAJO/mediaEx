@@ -5,8 +5,9 @@
  */
 import { appendFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { betterAuth } from 'better-auth'
-import { organization } from 'better-auth/plugins'
+import { admin, organization } from 'better-auth/plugins'
 import pg from 'pg'
 
 export const baseURL = new URL(process.env.BETTER_AUTH_URL ?? 'http://localhost:3400').origin
@@ -71,6 +72,25 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET)
 
 export const enabledSocial = { google: 'google' in socialProviders, github: 'github' in socialProviders }
 
+/* ------------------------------------------------ site admins */
+/** The bootstrap admins: everyone in SITE_ADMIN_EMAILS is an admin (more can be added from the admin dashboard). */
+export const siteAdminEmails = () =>
+  (process.env.SITE_ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => /^[^\s@]+@[^\s@]+$/.test(e))
+
+/** Writes one line to the admin audit log; never throws (an audit failure mustn't break the action). */
+export async function audit(entry: { adminId: string | null; action: string; targetType: string; targetId: string | null; details?: Record<string, unknown> }) {
+  await pool
+    .query(
+      `insert into "admin_audit" (id, "adminId", "adminEmail", action, "targetType", "targetId", details)
+       values ($1, $2, (select email from "user" where id = $2), $3, $4, $5, $6)`,
+      [`aud_${randomUUID().replace(/-/g, '').slice(0, 20)}`, entry.adminId, entry.action, entry.targetType, entry.targetId, JSON.stringify(entry.details ?? {})],
+    )
+    .catch((e) => console.error('[admin] audit write failed:', e instanceof Error ? e.message : e))
+}
+
 /* ------------------------------------------------ auth */
 export const auth = betterAuth({
   appName: 'MediaEX',
@@ -121,6 +141,8 @@ export const auth = betterAuth({
             [user.email],
           )
           if (!rows.length) await createPersonalWorkspace(user.id, user.name)
+          // a bootstrap admin who signs up later is an admin straight away
+          if (siteAdminEmails().includes(user.email.toLowerCase())) await pool.query(`update "user" set role = 'admin' where id = $1`, [user.id])
         },
       },
     },
@@ -134,10 +156,28 @@ export const auth = betterAuth({
           )
           return { data: { ...session, activeOrganizationId: rows[0]?.organizationId ?? null } }
         },
+        // every impersonation goes in the audit log, with who did it and when it expires
+        after: async (session) => {
+          const by = (session as { impersonatedBy?: string | null }).impersonatedBy
+          if (by) await audit({ adminId: by, action: 'user.impersonate.start', targetType: 'user', targetId: session.userId, details: { session: session.id, expiresAt: session.expiresAt } })
+        },
+      },
+      delete: {
+        after: async (session) => {
+          const by = (session as { impersonatedBy?: string | null }).impersonatedBy
+          if (by) await audit({ adminId: by, action: 'user.impersonate.stop', targetType: 'user', targetId: session.userId, details: { session: session.id } })
+        },
       },
     },
   },
   plugins: [
+    // site admins: roles, bans (a ban signs the user out everywhere) and impersonation (1 hour, never of another admin)
+    admin({
+      defaultRole: 'user',
+      adminRoles: ['admin'],
+      impersonationSessionDuration: 60 * 60,
+      bannedUserMessage: 'This account has been suspended. Contact MediaEX support if you think this is a mistake.',
+    }),
     organization({
       allowUserToCreateOrganization: true,
       organizationLimit: 10,

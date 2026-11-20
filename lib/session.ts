@@ -1,5 +1,5 @@
 import { headers } from 'next/headers'
-import { redirect } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { cache } from 'react'
 import type { Account } from '@/components/app/account'
 import type { MediaAsset } from '@/lib/media/types'
@@ -26,8 +26,13 @@ export async function requireAccount(): Promise<Account> {
 
 /** The active workspace's assets, for the dashboard's first render (the browser keeps them fresh afterwards). */
 export async function getWorkspaceAssets(): Promise<MediaAsset[]> {
-  const body = (await readAuthenticated('/api/assets')) as { assets: MediaAsset[] } | null
-  return body?.assets ?? []
+  const cookie = authCookies(await headers())
+  if (!cookie) return []
+  const response = await backendFetch('/api/assets', { headers: { cookie } })
+  // 401 signed out, 423 the workspace is suspended (the dashboard shows why)
+  if (response.status === 401 || response.status === 423) return []
+  if (!response.ok) throw new Error(`MediaEX API could not load the media (HTTP ${response.status}).`)
+  return ((await response.json()) as { assets: MediaAsset[] }).assets
 }
 
 /** One asset in the active workspace, or null when it doesn't exist there. */
@@ -57,4 +62,15 @@ export async function getEnabledSocial(): Promise<{ google: boolean; github: boo
   const response = await backendFetch('/api/mediaex/providers')
   if (!response.ok) throw new Error(`MediaEX API could not load sign-in providers (HTTP ${response.status}).`)
   return response.json()
+}
+
+/** The signed-in site admin, for the /admin pages. Not signed in → sign-in; signed in but not an admin → 404. */
+export async function requireSiteAdmin(): Promise<{ id: string; email: string; name: string }> {
+  const cookie = authCookies(await headers())
+  if (!cookie) redirect('/sign-in?next=%2Fadmin')
+  const response = await backendFetch('/api/admin/me', { headers: { cookie } })
+  if (response.status === 401) redirect('/sign-in?next=%2Fadmin')
+  if (response.status === 403) notFound()
+  if (!response.ok) throw new Error(`MediaEX API could not check admin access (HTTP ${response.status}).`)
+  return ((await response.json()) as { admin: { id: string; email: string; name: string } }).admin
 }

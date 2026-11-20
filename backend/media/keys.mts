@@ -9,7 +9,7 @@
  */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { pool } from '../auth.mts'
-import { HttpError, requireMember } from './assets.mts'
+import { HttpError, assertNotSuspended, requireMember } from './assets.mts'
 import { KEY_SCOPES, type ApiKey, type KeyScope } from './types.mts'
 
 const ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
@@ -51,6 +51,7 @@ export async function keyActor(req: Request): Promise<Actor> {
   const k = rows[0]
   // the lookup is by hash; compare again in constant time anyway
   if (!k || k.revokedAt || !timingSafeEqual(Buffer.from(k.hash), Buffer.from(hash))) throw new HttpError(401, 'That API key is invalid or has been revoked.')
+  await assertNotSuspended(k.organizationId)
 
   // token bucket: RATE_PER_MINUTE per key, refilled continuously
   const now = Date.now()

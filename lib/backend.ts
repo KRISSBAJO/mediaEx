@@ -86,7 +86,7 @@ export async function proxyAuth(request: Request) {
  */
 export async function proxyMedia(request: Request) {
   const incoming = new URL(request.url)
-  if (!/^\/api\/(assets|uploads|media|folders|collections|tags|searches|fields|moderation|keys|webhooks|v1|playback|analytics|encoding|billing)(\/|$)/.test(incoming.pathname)) return new Response(null, { status: 404 })
+  if (!/^\/api\/(assets|uploads|media|folders|collections|tags|searches|fields|moderation|keys|webhooks|v1|playback|analytics|encoding|billing|admin)(\/|$)/.test(incoming.pathname)) return new Response(null, { status: 404 })
 
   const headers = new Headers()
   // country headers some CDNs add feed view analytics; payment providers sign their webhooks
