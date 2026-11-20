@@ -25,8 +25,9 @@
  */
 import { statfs } from 'node:fs/promises'
 import path from 'node:path'
-import { audit, auth, baseURL, pool, siteAdminEmails } from './auth.mts'
-import { HttpError, handle, getAssetRow, prefixOf } from './media/assets.mts'
+import { audit, auth, baseURL, isVerifiedAdmin, pool, siteAdminEmails } from './auth.mts'
+import { retry } from './media/routes.mts'
+import { HttpError, handle, getAssetRow } from './media/assets.mts'
 import { storage } from './media/storage.mts'
 import { kickWorker } from './media/worker.mts'
 import { encoders, encoderFor } from './media/encoding.mts'
@@ -43,8 +44,7 @@ const PAID: PlanId[] = ['pro', 'studio']
 export async function requireAdmin(headers: Headers): Promise<Admin> {
   const s = await auth.api.getSession({ headers })
   if (!s) throw new HttpError(401, 'Sign in to continue.')
-  const role = (s.user as { role?: string | null }).role ?? ''
-  if ((s.session as { impersonatedBy?: string | null }).impersonatedBy || !role.split(',').includes('admin')) throw new HttpError(403, 'Site admins only.')
+  if (!isVerifiedAdmin(s.user, s.session)) throw new HttpError(403, 'Site admins only.')
   return { id: s.user.id, email: s.user.email, name: s.user.name }
 }
 
@@ -58,6 +58,19 @@ const page = (sp: URLSearchParams, max = 100) => ({
 const like = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
 const MONTH_PRICE = (plan: PlanId, interval: string | null) => (interval === 'year' ? PLANS[plan].year / 12 : PLANS[plan].month)
 
+// Roll up committed original, output, transform, version and reservation bytes across tenants.
+// Trash still occupies storage. Expired or canceled uploads no longer reserve capacity.
+const storageByWorkspace = `
+  select org, sum(bytes)::float8 as bytes from (
+    select "organizationId" as org, sum(case when status <> 'uploading' then size + "outputSize"
+      when "deletedAt" is null and ("uploadExpiresAt" is null or "uploadExpiresAt" > now()) then size else 0 end) as bytes
+    from asset group by "organizationId"
+    union all
+    select a."organizationId", sum(v.bytes) from asset_variant v join asset a on a.id = v."assetId" group by a."organizationId"
+    union all
+    select "organizationId", sum(size + "outputSize") from asset_revision group by "organizationId"
+  ) usage group by org`
+
 /* ------------------------------------------------ overview */
 async function overview() {
   const [{ rows: [k] }, { rows: signups }, { rows: recent }, { rows: topStorage }, { rows: mrrRows }] = await Promise.all([
@@ -67,21 +80,22 @@ async function overview() {
       (select count(*)::int from "user" where banned) as banned,
       (select count(*)::int from "organization") as workspaces,
       (select count(*)::int from "workspace_admin" where "suspendedAt" is not null) as suspended,
-      (select count(*)::int from "asset") as assets,
-      (select coalesce(sum(size + "outputSize"), 0)::text from "asset") as "storageBytes",
-      (select coalesce(sum(duration), 0)::float / 60 from "asset" where "readyAt" > date_trunc('month', now()) and type <> 'image') as "minutesThisMonth",
+      (select count(*)::int from "asset" where "deletedAt" is null) as assets,
+      (select coalesce(sum(bytes), 0) from (${storageByWorkspace}) usage) as "storageBytes",
+      (select coalesce(sum(media_seconds), 0)::float8 / 60 from workspace_processing_completion where completed_at >= date_trunc('month', now())) as "minutesThisMonth",
       (select count(*)::int from "view_session" where "startedAt" > now() - interval '30 days' and "watchSeconds" >= 2) as "views30d",
-      (select count(*)::int from "asset" where status = 'failed' and "updatedAt" > now() - interval '24 hours') as "failed24h",
-      (select count(*)::int from "asset" where status in ('queued', 'processing')) as "inPipeline",
+      (select count(*)::int from "asset" where "deletedAt" is null and status = 'failed' and "updatedAt" > now() - interval '24 hours') as "failed24h",
+      (select count(*)::int from "asset" where "deletedAt" is null and status in ('queued', 'processing')) as "inPipeline",
       (select count(*)::int from "subscription" where status = 'past_due') as "pastDue",
       (select count(*)::int from "webhook_endpoint" where enabled and failures >= 3) as "failingWebhooks",
-      (select count(*)::int from "asset" where "takenDown" is not null) as "takenDown",
-      (select count(*)::int from "asset" where moderation = 'pending') as "inReview"`),
+      (select count(*)::int from "asset" where "deletedAt" is null and "takenDown" is not null) as "takenDown",
+      (select count(*)::int from "asset" where "deletedAt" is null and moderation = 'pending') as "inReview"`),
     pool.query(`select to_char(d, 'YYYY-MM-DD') as day, (select count(*)::int from "user" u where u."createdAt" >= d and u."createdAt" < d + interval '1 day') as users
        from generate_series(date_trunc('day', now()) - interval '29 days', date_trunc('day', now()), interval '1 day') d order by d`),
     pool.query(`select id, name, email, "createdAt", "emailVerified" from "user" order by "createdAt" desc limit 8`),
-    pool.query(`select o.id, o.name, coalesce(sum(a.size + a."outputSize"), 0)::text as bytes, count(a.id)::int as assets
-       from "organization" o left join "asset" a on a."organizationId" = o.id group by o.id order by sum(a.size + a."outputSize") desc nulls last limit 6`),
+    pool.query(`select o.id, o.name, coalesce(s.bytes, 0) as bytes,
+       (select count(*)::int from asset a where a."organizationId" = o.id and a."deletedAt" is null) as assets
+       from "organization" o left join (${storageByWorkspace}) s on s.org = o.id order by bytes desc, o.id limit 6`),
     pool.query(`select plan, interval from "subscription" where status in ('active', 'past_due') and "currentPeriodEnd" > now() and plan in ('pro', 'studio')`),
   ])
   const mrr = mrrRows.reduce((t, r) => t + MONTH_PRICE(r.plan, r.interval), 0)
@@ -103,7 +117,7 @@ async function listUsers(sp: URLSearchParams) {
   if (q) where.push(`(u.email ilike ${arg(like(q))} or u.name ilike ${arg(like(q))} or u.id = ${arg(q)})`)
   const status = sp.get('status')
   if (status === 'banned') where.push('u.banned')
-  if (status === 'admins') where.push(`u.role = 'admin'`)
+  if (status === 'admins') where.push(`u."emailVerified" is true and 'admin' = any(string_to_array(u.role, ','))`)
   if (status === 'unverified') where.push('not u."emailVerified"')
   if (status === 'active') where.push('not coalesce(u.banned, false)')
   const w = where.length ? `where ${where.join(' and ')}` : ''
@@ -127,7 +141,7 @@ async function oneUser(id: string) {
   const [{ rows: workspaces }, { rows: sessions }, { rows: accounts }, { rows: log }] = await Promise.all([
     pool.query(
       `select o.id, o.name, o.slug, m.role, (select count(*)::int from "member" x where x."organizationId" = o.id) as members,
-              (select count(*)::int from "asset" a where a."organizationId" = o.id) as assets,
+              (select count(*)::int from "asset" a where a."organizationId" = o.id and a."deletedAt" is null) as assets,
               (select w."suspendedAt" from "workspace_admin" w where w."organizationId" = o.id) as "suspendedAt"
          from "member" m join "organization" o on o.id = m."organizationId" where m."userId" = $1 order by m."createdAt"`,
       [id],
@@ -175,8 +189,9 @@ async function userAction(a: Admin, req: Request, id: string, action: string) {
       await audit({ adminId: a.id, action: 'user.sign-out-everywhere', targetType: 'user', targetId: id, details: { email: u.email } })
       break
     case 'verify-email':
-      await pool.query(`update "user" set "emailVerified" = true, "updatedAt" = now() where id = $1`, [id])
-      await audit({ adminId: a.id, action: 'user.verify-email', targetType: 'user', targetId: id, details: { email: u.email } })
+      if (process.env.NODE_ENV === 'production' && !process.env.RESEND_API_KEY) throw new HttpError(503, 'Verification email delivery needs to be configured first.')
+      await auth.api.sendVerificationEmail({ body: { email: u.email, callbackURL: baseURL + '/dashboard' } })
+      await audit({ adminId: a.id, action: 'user.send-verification-email', targetType: 'user', targetId: id })
       break
     case 'reset-password':
       await auth.api.requestPasswordReset({ body: { email: u.email, redirectTo: `${baseURL}/reset-password` } })
@@ -185,7 +200,7 @@ async function userAction(a: Admin, req: Request, id: string, action: string) {
     case 'role': {
       const b = await body<{ role?: unknown }>(req)
       if (b.role !== 'admin' && b.role !== 'user') throw new HttpError(400, 'role must be "admin" or "user".')
-      await setRole(a, u, b.role, headers)
+      await setRole(a, u, b.role)
       break
     }
     default:
@@ -194,28 +209,28 @@ async function userAction(a: Admin, req: Request, id: string, action: string) {
   return Response.json(await oneUser(id), { headers: noStore })
 }
 
-async function setRole(a: Admin, u: { id: string; email: string }, role: 'admin' | 'user', headers: Headers) {
+async function setRole(a: Admin, u: { id: string; email: string }, role: 'admin' | 'user') {
   if (role === 'user') {
     if (u.id === a.id) throw new HttpError(400, 'You can’t remove your own admin role. Ask another admin.')
     if (siteAdminEmails().includes(u.email.toLowerCase())) throw new HttpError(400, `${u.email} is in SITE_ADMIN_EMAILS, so they’re an admin again on the next start. Remove them from that setting first.`)
   }
-  await auth.api.setRole({ headers, body: { userId: u.id, role } })
+  const result = await pool.query(`update "user" set role=$2, "updatedAt"=now()
+    where id=$1 and lower(email)=lower($3) and ($2 <> 'admin' or "emailVerified" is true)`, [u.id, role, u.email])
+  if (!result.rowCount) throw new HttpError(409, 'The account must verify its current email before receiving site admin access.')
   await audit({ adminId: a.id, action: role === 'admin' ? 'admin.add' : 'admin.remove', targetType: 'user', targetId: u.id, details: { email: u.email } })
 }
 
-/** Deletes a workspace: its rows (cascading to assets, keys, webhooks…) and every file it stored. */
+/** Database triggers persist every physical file reference before organization/user cascades. */
 async function deleteWorkspace(orgId: string) {
-  const { rows: assets } = await pool.query<{ id: string; organizationId: string; upload: { uploadId: string } | null; originalKey: string }>(
-    'select id, "organizationId", upload, "originalKey" from "asset" where "organizationId" = $1',
-    [orgId],
-  )
-  await pool.query('delete from "organization" where id = $1', [orgId])
-  // files go after the rows, so nothing can reference a half-deleted asset; failures are logged, not fatal
-  for (const x of assets) {
-    if (x.upload) await storage().multipartAbort(x.originalKey, x.upload.uploadId).catch(() => {})
-    await storage().removePrefix(prefixOf(x)).catch((e) => console.error(`[admin] couldn’t remove files of ${x.id}:`, e instanceof Error ? e.message : e))
+  const { rows: [{ count }] } = await pool.query('select count(*)::int as count from asset where "organizationId"=$1',[orgId])
+  try {
+    const deleted = await pool.query('delete from organization where id=$1 returning id',[orgId])
+    if (!deleted.rowCount) throw new HttpError(404, 'Workspace unavailable.')
+  } catch (error) {
+    if ((error as { code?: string }).code === '55P03') throw new HttpError(409, 'Wait for active media jobs to finish before deleting the workspace.')
+    throw error
   }
-  return assets.length
+  return count as number
 }
 
 async function deleteUser(a: Admin, req: Request, id: string) {
@@ -224,8 +239,8 @@ async function deleteUser(a: Admin, req: Request, id: string) {
   if (!u) throw new HttpError(404, 'That user doesn’t exist.')
   if ((u.role ?? '').split(',').includes('admin')) throw new HttpError(400, 'Remove their admin role before deleting an admin.')
   const sole = await soleWorkspaces(id)
-  let assets = 0
-  for (const w of sole) assets += await deleteWorkspace(w.id)
+  const {rows:[{assets}]} = await pool.query('select count(*)::int as assets from asset where "organizationId"=any($1::text[])',[sole.map(w => w.id)])
+  // The user-delete trigger rechecks locked memberships before deleting sole-member workspaces.
   await auth.api.removeUser({ headers: req.headers, body: { userId: id } })
   await audit({ adminId: a.id, action: 'user.delete', targetType: 'user', targetId: id, details: { email: u.email, workspacesDeleted: sole.map((w) => w.name), assetsDeleted: assets } })
   return new Response(null, { status: 204 })
@@ -249,8 +264,8 @@ async function listWorkspaces(sp: URLSearchParams) {
     `select o.id, o.name, o.slug, o."createdAt", w."suspendedAt", w."suspendReason", w."planOverride", w."overrideUntil",
             s.plan as "subPlan", s.status as "subStatus", s."currentPeriodEnd", s.interval,
             (select count(*)::int from "member" m where m."organizationId" = o.id) as members,
-            (select count(*)::int from "asset" a where a."organizationId" = o.id) as assets,
-            (select coalesce(sum(a.size + a."outputSize"), 0)::text from "asset" a where a."organizationId" = o.id) as bytes,
+            (select count(*)::int from "asset" a where a."organizationId" = o.id and a."deletedAt" is null) as assets,
+            (select coalesce(sum(used.bytes), 0) from (${storageByWorkspace}) used where used.org = o.id) as bytes,
             (select u.email from "member" m join "user" u on u.id = m."userId" where m."organizationId" = o.id and m.role like 'owner%' order by m."createdAt" limit 1) as owner
        ${from} order by o."createdAt" desc limit ${limit} offset ${offset}`,
     args,
@@ -279,14 +294,14 @@ async function oneWorkspace(id: string) {
   const [{ rows: members }, { rows: [usage] }, { rows: assets }, { rows: [dev] }, { rows: settings }, { rows: log }] = await Promise.all([
     pool.query(`select u.id, u.name, u.email, u.banned, m.role, m."createdAt" from "member" m join "user" u on u.id = m."userId" where m."organizationId" = $1 order by m."createdAt"`, [id]),
     pool.query(
-      `select count(*)::int as assets, coalesce(sum(size + "outputSize"), 0)::text as bytes,
+      `select count(*)::int as assets, (select coalesce(sum(used.bytes), 0) from (${storageByWorkspace}) used where used.org = $1) as bytes,
               count(*) filter (where status = 'failed')::int as failed, count(*) filter (where "takenDown" is not null)::int as "takenDown",
-              coalesce(sum(duration) filter (where "readyAt" > date_trunc('month', now()) and type <> 'image'), 0)::float / 60 as "minutesThisMonth",
+              (select coalesce(sum(media_seconds), 0)::float8 / 60 from workspace_processing_completion where org_id=$1 and completed_at >= date_trunc('month', now())) as "minutesThisMonth",
               (select count(*)::int from "view_session" v where v."organizationId" = $1 and v."startedAt" > now() - interval '30 days' and v."watchSeconds" >= 2) as "views30d"
-         from "asset" where "organizationId" = $1`,
+         from "asset" where "organizationId" = $1 and "deletedAt" is null`,
       [id],
     ),
-    pool.query(`select id, title, type, status, moderation, "takenDown", size, "createdAt" from "asset" where "organizationId" = $1 order by "createdAt" desc limit 12`, [id]),
+    pool.query(`select id, title, type, status, moderation, "takenDown", size, "createdAt" from "asset" where "organizationId" = $1 and "deletedAt" is null order by "createdAt" desc,id desc limit 12`, [id]),
     pool.query(
       `select (select count(*)::int from "api_key" k where k."organizationId" = $1 and k."revokedAt" is null) as keys,
               (select count(*)::int from "webhook_endpoint" e where e."organizationId" = $1) as webhooks`,
@@ -332,7 +347,7 @@ async function workspaceAction(a: Admin, req: Request, id: string, action: strin
 /* ------------------------------------------------ media */
 async function listAssets(sp: URLSearchParams) {
   const { limit, offset } = page(sp)
-  const where: string[] = []
+  const where = ['a."deletedAt" is null']
   const args: unknown[] = []
   const arg = (v: unknown) => (args.push(v), `$${args.length}`)
   const q = sp.get('q')?.trim()
@@ -349,7 +364,7 @@ async function listAssets(sp: URLSearchParams) {
     `select a.id, a.title, a.type, a.status, a.error, a.moderation, a."moderationFlags", a."takenDown", a."takenDownAt", a.size, a."outputSize", a.duration,
             a."createdAt", a."thumbKey" is not null as "hasThumb", a.playback, o.id as "workspaceId", o.name as "workspaceName",
             (select count(*)::int from "view_session" v where v."assetId" = a.id and v."watchSeconds" >= 2) as views
-       from "asset" a join "organization" o on o.id = a."organizationId" ${w} order by a."createdAt" desc limit ${limit} offset ${offset}`,
+       from "asset" a join "organization" o on o.id = a."organizationId" ${w} order by a."createdAt" desc, a.id desc limit ${limit} offset ${offset}`,
     args,
   )
   const { rows: [t] } = await pool.query(`select count(*)::int as total from "asset" a ${w}`, args)
@@ -357,40 +372,47 @@ async function listAssets(sp: URLSearchParams) {
 }
 
 async function assetAction(a: Admin, req: Request, id: string, action: string) {
-  const row = await getAssetRow(id)
-  if (!row) throw new HttpError(404, 'That asset doesn’t exist.')
-  if (action === 'takedown') {
-    const b = await body<{ reason?: unknown }>(req)
-    const reason = typeof b.reason === 'string' && b.reason.trim() ? b.reason.trim().slice(0, 300) : 'Removed by MediaEX'
-    await pool.query(`update "asset" set "takenDown" = $2, "takenDownAt" = now(), "updatedAt" = now() where id = $1`, [id, reason])
-    await audit({ adminId: a.id, action: 'asset.takedown', targetType: 'asset', targetId: id, details: { title: row.title, workspace: row.organizationId, reason } })
-  } else if (action === 'restore') {
-    await pool.query(`update "asset" set "takenDown" = null, "takenDownAt" = null, "updatedAt" = now() where id = $1`, [id])
-    await audit({ adminId: a.id, action: 'asset.restore', targetType: 'asset', targetId: id, details: { title: row.title, workspace: row.organizationId } })
-  } else if (action === 'retry') {
-    if (row.status !== 'failed' && row.status !== 'ready') throw new HttpError(409, 'Only failed or ready assets can be processed again.')
-    await pool.query(`update "asset" set status = 'queued', stage = 1, progress = 0, error = null, attempts = 0, "updatedAt" = now() where id = $1`, [id])
-    kickWorker()
-    await audit({ adminId: a.id, action: 'asset.retry', targetType: 'asset', targetId: id, details: { title: row.title, workspace: row.organizationId } })
-  } else throw new HttpError(404, 'Not found')
-  return Response.json({ ok: true }, { headers: noStore })
+  if (action === 'retry') {
+    const row = await getAssetRow(id)
+    if (!row) throw new HttpError(404, 'Asset unavailable.')
+    await retry({ orgId:row.organizationId, userId:a.id, via:'session', role:'admin', scope:'full' },id)
+    await audit({ adminId:a.id, action:'asset.retry', targetType:'asset',targetId:id,details:{title:row.title,workspace:row.organizationId} })
+  } else if (action === 'takedown' || action === 'restore') {
+    const input = action === 'takedown' ? await body<{reason?:unknown}>(req) : {}
+    const reason = action === 'restore' ? null : typeof input.reason === 'string' && input.reason.trim() ? input.reason.trim().slice(0,300) : 'Removed by MediaEX'
+    // Restore clears only the platform hold. Workspace Trash, pending review and signed playback remain effective.
+    const {rows:[row]} = await pool.query(`update asset set "takenDown"=$2, "takenDownAt"=case when $2::text is null then null else now() end,
+      "updatedAt"=now() where id=$1 returning title,"organizationId"`,[id,reason])
+    if (!row) throw new HttpError(404, 'Asset unavailable.')
+    await audit({ adminId:a.id, action:'asset.'+action, targetType:'asset',targetId:id, details:{title:row.title,workspace:row.organizationId,reason} })
+  } else throw new HttpError(404, 'Action unavailable.')
+  return Response.json({ ok:true }, { headers:noStore })
 }
 
 async function deleteAsset(a: Admin, id: string) {
-  const row = await getAssetRow(id)
-  if (!row) throw new HttpError(404, 'That asset doesn’t exist.')
-  await pool.query('delete from "asset" where id = $1', [id])
-  if (row.upload) await storage().multipartAbort(row.originalKey, row.upload.uploadId).catch(() => {})
-  await storage().removePrefix(prefixOf(row)).catch(() => {})
-  await audit({ adminId: a.id, action: 'asset.delete', targetType: 'asset', targetId: id, details: { title: row.title, workspace: row.organizationId } })
-  return new Response(null, { status: 204 })
+  const db = await pool.connect()
+  try {
+    await db.query('begin')
+    const {rows:[row]} = await db.query('select title,"organizationId" from asset where id=$1 for update',[id])
+    if (!row) throw new HttpError(404,'Asset unavailable.')
+    await db.query('select enqueue_media_erasure($1)',[id])
+    await db.query('delete from asset where id=$1',[id])
+    await db.query(`insert into admin_audit (id,"adminId","adminEmail",action,"targetType","targetId",details)
+      values ('aud_'||replace(gen_random_uuid()::text,'-',''),$1,$2,'asset.delete','asset',$3,$4)`,[a.id,a.email,id,JSON.stringify({title:row.title,workspace:row.organizationId})])
+    await db.query('commit')
+  } catch (error) {
+    await db.query('rollback')
+    if ((error as {code?:string}).code === '55P03') throw new HttpError(409,'Wait for active media jobs to finish before deleting the asset.')
+    throw error
+  } finally { db.release() }
+  return new Response(null,{status:204})
 }
 
 /** The thumbnail, for admins (works whatever the asset's moderation, takedown or signed-playback state). */
 async function assetThumb(id: string, req: Request) {
   const row = await getAssetRow(id)
   if (!row?.thumbKey) return new Response('Not found', { status: 404 })
-  return storage().serve(row.thumbKey, req)
+  return storage(row).serve(row.thumbKey, req, { access: 'member' })
 }
 
 /* ------------------------------------------------ billing */
@@ -437,13 +459,13 @@ async function ops() {
                        count(*) filter (where status = 'processing')::int as processing,
                        count(*) filter (where status = 'failed' and "updatedAt" > now() - interval '24 hours')::int as "failed24h",
                        min("updatedAt") filter (where status = 'queued') as "oldestQueued",
-                       count(*) filter (where status = 'uploading' and "updatedAt" < now() - interval '1 day')::int as "staleUploads"
-                  from "asset"`),
+                       count(*) filter (where status = 'uploading' and "uploadExpiresAt" <= now())::int as "staleUploads"
+                  from "asset" where "deletedAt" is null`),
     pool.query(`select a.id, a.title, a.error, a.attempts, a."updatedAt", o.name as "workspaceName" from "asset" a join "organization" o on o.id = a."organizationId"
-                 where a.status = 'failed' order by a."updatedAt" desc limit 25`),
+                 where a."deletedAt" is null and a.status = 'failed' order by a."updatedAt" desc limit 25`),
     pool.query(`select count(*) filter (where status = 'queued')::int as queued, count(*) filter (where status = 'processing')::int as processing,
-                       count(*) filter (where status = 'failed')::int as failed, count(*) filter (where status = 'ready')::int as ready from "caption"`),
-    pool.query(`select c."assetId", c.error, c."updatedAt", a.title from "caption" c join "asset" a on a.id = c."assetId" where c.status = 'failed' order by c."updatedAt" desc limit 10`),
+                       count(*) filter (where status = 'failed')::int as failed, count(*) filter (where status = 'ready')::int as ready from "caption" c where exists (select 1 from asset a where a.id=c."assetId" and a."deletedAt" is null)`),
+    pool.query(`select c."assetId", c.error, c."updatedAt", a.title from "caption" c join "asset" a on a.id = c."assetId" where a."deletedAt" is null and c.status = 'failed' order by c."updatedAt" desc limit 10`),
     pool.query(`select e.id, e.url, e.failures, e.enabled, o.name as "workspaceName",
                        (select max(d."createdAt") from "webhook_delivery" d where d."endpointId" = e.id and d.status = 'succeeded') as "lastSuccess"
                   from "webhook_endpoint" e join "organization" o on o.id = e."organizationId" where e.failures > 0 order by e.failures desc limit 20`),
@@ -509,7 +531,7 @@ async function admins() {
   const env = siteAdminEmails()
   const { rows } = await pool.query(
     `select u.id, u.name, u.email, u."createdAt", (select max(s."updatedAt") from "session" s where s."userId" = u.id) as "lastSeenAt"
-       from "user" u where u.role = 'admin' order by u."createdAt"`,
+       from "user" u where u."emailVerified" is true and 'admin'=any(string_to_array(u.role, ',')) order by u."createdAt"`,
   )
   return { admins: rows.map((r) => ({ ...r, bootstrap: env.includes(r.email.toLowerCase()) })), pending: env.filter((e) => !rows.some((r) => r.email.toLowerCase() === e)) }
 }
@@ -557,7 +579,8 @@ export async function handleAdmin(req: Request, parts: string[]) {
       if (id === 'retry-failed' && m === 'POST') {
         const { rows } = await pool.query<{ id: string }>(
           `update "asset" set status = 'queued', stage = 1, progress = 0, error = null, attempts = 0, "updatedAt" = now()
-            where status = 'failed' and "updatedAt" > now() - interval '24 hours' returning id`,
+            where status = 'failed' and "deletedAt" is null and "takenDown" is null and "updatedAt" > now() - interval '24 hours'
+              and not exists(select 1 from workspace_admin w where w."organizationId"=asset."organizationId" and w."suspendedAt" is not null) returning id`,
         )
         kickWorker()
         await audit({ adminId: a.id, action: 'ops.retry-failed', targetType: 'platform', targetId: null, details: { count: rows.length } })
@@ -572,13 +595,13 @@ export async function handleAdmin(req: Request, parts: string[]) {
         const email = typeof b.email === 'string' ? b.email.trim().toLowerCase() : ''
         const { rows: [u] } = await pool.query<{ id: string; email: string }>('select id, email from "user" where lower(email) = $1', [email])
         if (!u) throw new HttpError(404, 'There’s no MediaEX account with that email. They need to sign up first.')
-        await setRole(a, u, 'admin', req.headers)
+        await setRole(a, u, 'admin')
         return Response.json(await admins())
       }
       if (id && m === 'DELETE') {
         const { rows: [u] } = await pool.query<{ id: string; email: string }>('select id, email from "user" where id = $1', [id])
         if (!u) throw new HttpError(404, 'That user doesn’t exist.')
-        await setRole(a, u, 'user', req.headers)
+        await setRole(a, u, 'user')
         return Response.json(await admins())
       }
     }
