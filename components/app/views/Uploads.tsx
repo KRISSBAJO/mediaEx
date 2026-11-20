@@ -12,7 +12,7 @@ import { Card, ModerationBadge, PageHead, StatusBadge, Thumb } from '../ui'
 
 function transferLine(t: Transfer, assetStatus?: string, stage?: number, progress?: number, moderation?: string) {
   if (t.state === 'waiting') return 'Waiting to upload'
-  if (t.state === 'uploading') return `Uploading · ${bytes(t.loaded)} of ${bytes(t.size)}`
+  if (t.state === 'uploading') return `${t.resumed ? 'Resuming' : 'Uploading'} · ${bytes(t.loaded)} of ${bytes(t.size)}${t.resumable ? ' · in parts' : ''}`
   if (t.state === 'error') return t.error ?? 'Upload failed'
   if (t.state === 'cancelled') return 'Cancelled'
   if (assetStatus === 'ready' && moderation === 'pending') return 'Ready · waiting for review before it goes public'
@@ -92,7 +92,7 @@ export default function Uploads() {
               <Icon name="upload" size={22} />
             </span>
             <b>{drag ? `Drop to upload${target ? ` into ${target}` : ''}` : 'Drag files here, or browse'}</b>
-            <p>Video, audio and images up to 5 GB each — MP4, MOV, MKV, WebM, MXF, WAV, MP3, FLAC, JPEG, PNG and more.</p>
+            <p>Video, audio and images up to 50 GB each — MP4, MOV, MKV, WebM, MXF, WAV, MP3, FLAC, JPEG, PNG and more.</p>
             <span className="btn btn-ghost btn-sm">Browse files</span>
           </label>
 
@@ -179,7 +179,7 @@ export default function Uploads() {
                       <span>
                         <b>{a.title}</b>
                         <small>
-                          {bytes(a.size)} · {a.status === 'queued' ? 'Waiting for an encoder' : a.status === 'uploading' ? 'Uploading' : `${STAGES[a.stage]}…`}
+                          {bytes(a.size)} · {a.status === 'queued' ? 'Waiting for an encoder' : a.status === 'uploading' ? 'Upload interrupted — add the same file again to resume' : `${STAGES[a.stage]}…`}
                         </small>
                       </span>
                     </Link>
@@ -204,7 +204,7 @@ export default function Uploads() {
               </li>
               <li>
                 <b>Encode</b>
-                <span>Video becomes an H.264 adaptive ladder from 1080p down to 360p, never above the source. Audio becomes AAC. Images get a web-sized poster.</span>
+                <span>Video becomes an H.264 adaptive ladder from 1080p down to 360p, never above the source, plus HEVC and AV1 ladders if they’re on in Settings → Encoding. Audio becomes AAC. Images get a web-sized poster.</span>
               </li>
               <li>
                 <b>Package</b>
@@ -214,7 +214,8 @@ export default function Uploads() {
           </Card>
           <Card title="Good to know">
             <ul className="facts">
-              <li>Uploads keep going while you move around the dashboard. Closing the tab stops them.</li>
+              <li>Uploads keep going while you move around the dashboard. Closing the tab pauses them.</li>
+              <li>Files over 64 MB go up in parts. A dropped connection only retries the part it was on, and adding the same file again after closing the tab picks up where it stopped.</li>
               <li>Two files upload at a time; the rest wait their turn.</li>
               <li>Processing usually takes less time than the video lasts.</li>
             </ul>

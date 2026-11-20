@@ -13,8 +13,6 @@ import { MediaProvider, useMedia } from './media'
 import Icon from './Icon'
 import { Avatar, Meter, Toaster, toast } from './ui'
 
-/** the Free plan's storage allowance (see pricing) */
-const FREE_STORAGE = 100 * 1e9
 
 const NAV = [
   {
@@ -94,10 +92,7 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
   return (
     <div className="side-inner">
       <Link href="/" className="brand side-brand" onClick={onNavigate}>
-        <Logo size={24} />
-        <span>
-          Media<b>EX</b>
-        </span>
+        <Logo size={20} />
       </Link>
 
       <div className="menu-wrap" ref={wsRef}>
@@ -105,7 +100,7 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
           <span className="ws-mark">{workspace.initial}</span>
           <span className="ws-text">
             <b>{workspace.name}</b>
-            <em>{busy ? 'Switching…' : `${workspace.role[0].toUpperCase()}${workspace.role.slice(1)} · Free plan`}</em>
+            <em>{busy ? 'Switching…' : `${workspace.role[0].toUpperCase()}${workspace.role.slice(1)} · ${workspace.plan.name}`}</em>
           </span>
           <Icon name="updown" size={15} />
         </button>
@@ -161,10 +156,10 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
           <div className="usage-row">
             <span>Storage</span>
             <b>
-              {used ? bytes(used) : '0 GB'} / 100 GB
+              {used ? bytes(used) : '0 GB'} / {bytes(workspace.plan.storageLimit)}
             </b>
           </div>
-          <Meter value={used} max={FREE_STORAGE} />
+          <Meter value={used} max={workspace.plan.storageLimit} />
           <Link href="/dashboard/settings?tab=billing" className="usage-link" onClick={onNavigate}>
             Manage plan <Icon name="arrowRight" size={13} />
           </Link>
@@ -410,9 +405,6 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
           <div className="top-actions">
-            <span className="sample-pill" title="Your account, team, media, API keys and webhooks are real. Analytics and billing are sample data until those backends exist.">
-              Sample analytics
-            </span>
             <button type="button" className="search-btn" onClick={() => setCmd(true)}>
               <Icon name="search" size={16} />
               <span>Search</span>

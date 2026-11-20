@@ -163,6 +163,7 @@ export function Tabs<T extends string>({ value, tabs, onChange }: { value: T; ta
 
 /* ------------------------------------------------ stat tile with sparkline */
 export function Sparkline({ points }: { points: Point[] }) {
+  if (points.length < 2) return null // nothing to draw yet (the data is still loading)
   const w = 120
   const h = 32
   const vals = points.map((p) => p.value)

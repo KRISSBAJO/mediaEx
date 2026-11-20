@@ -40,12 +40,14 @@ export async function getWorkspaceAsset(id: string): Promise<MediaAsset | null> 
   return ((await response.json()) as { asset: MediaAsset }).asset
 }
 
-export type PublicMedia = Pick<MediaAsset, 'id' | 'title' | 'type' | 'status' | 'progress' | 'duration' | 'width' | 'height' | 'renditions' | 'thumbUrl' | 'posterUrl' | 'playbackUrl'>
+export type PublicMedia = Pick<MediaAsset, 'id' | 'title' | 'type' | 'status' | 'progress' | 'duration' | 'width' | 'height' | 'renditions' | 'thumbUrl' | 'posterUrl' | 'playbackUrl' | 'playbackUrls' | 'captions'>
 
 /** What the public share/embed player needs. No session involved: anyone with the link can watch. */
-export async function getPublicMedia(id: string): Promise<PublicMedia | null> {
+export async function getPublicMedia(id: string, token?: string): Promise<PublicMedia | null> {
   if (!/^ast_[a-z0-9]+$/.test(id)) return null
-  const response = await backendFetch(`/api/media/${id}/info`)
+  // signed assets: the viewer's playback token rides along, and the URLs that come back carry it
+  const query = token && /^\d{10}\.[A-Za-z0-9_-]{43}$/.test(token) ? `?token=${token}` : ''
+  const response = await backendFetch(`/api/media/${id}/info${query}`)
   if (response.status === 404) return null
   if (!response.ok) throw new Error(`MediaEX API could not load the media (HTTP ${response.status}).`)
   return response.json()

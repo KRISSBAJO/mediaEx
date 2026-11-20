@@ -6,12 +6,21 @@
  *   GET    /api/v1/whoami                       the key's workspace and scope                       read
  *   GET    /api/v1/assets?q=&folder=&type=&status=&tags=&date=&sort=&limit=&offset=                  read
  *   GET    /api/v1/assets/:id                                                                       read
- *   PATCH  /api/v1/assets/:id                   { title?, tags?, folderId?, metadata? }             full
+ *   PATCH  /api/v1/assets/:id                   { title?, tags?, folderId?, metadata?, playback? }  full
+ *   GET    /api/v1/assets/:id/captions          caption tracks                                      read
+ *   POST   /api/v1/assets/:id/captions/generate transcribe { language? }                            full
+ *   PUT    /api/v1/assets/:id/captions/:lang    upload a track { label?, text } (WebVTT or SRT)     full
+ *   DELETE /api/v1/assets/:id/captions/:lang                                                        full
+ *   POST   /api/v1/assets/:id/playback-token    { expiresIn? } → { token, expiresAt, embedUrl, playbackUrl }   read
  *   DELETE /api/v1/assets/:id                                                                       full
  *   POST   /api/v1/assets/:id/retry             run the pipeline again                              full
- *   POST   /api/v1/uploads                      { fileName, size, mimeType?, folderId? } → { asset, upload }   upload
+ *   POST   /api/v1/uploads                      { fileName, size, mimeType?, folderId?, multipart? } → { asset, upload }   upload
  *   PUT    /api/v1/uploads/:id                  the file (only when upload.url points here)         upload
+ *   POST   /api/v1/uploads/:id/parts            { numbers } → where to PUT each part (multipart)    upload
+ *   GET    /api/v1/uploads/:id/parts            parts that have arrived, to resume (multipart)      upload
+ *   PUT    /api/v1/uploads/:id/parts/:n         one part (only when its URL points here)            upload
  *   POST   /api/v1/uploads/:id/complete         queue it for processing                             upload
+ *   GET    /api/v1/analytics?range=7d|30d|90d&asset=                                             read
  *   GET    /api/v1/folders                                                                          read
  *
  * Responses use the same asset shape as the dashboard, with absolute URLs. Errors are { error } with a matching status;
@@ -20,8 +29,9 @@
 import { baseURL, pool } from '../auth.mts'
 import { HttpError, apiAsset, handle, searchAssets } from './assets.mts'
 import { keyActor, requireScope } from './keys.mts'
-import { completeUpload, one, receiveUpload, retry, startUpload } from './routes.mts'
+import { captions, completeUpload, one, playbackToken, receivePart, receiveUpload, retry, startUpload, uploadParts } from './routes.mts'
 import { KEY_SCOPE_LABEL, parseQuery } from './types.mts'
+import { analyticsFor } from './analytics.mts'
 
 /** Where API callers reach us: the public app origin, which forwards /api/v1 to this service. */
 export const apiBase = () => (process.env.PUBLIC_API_URL ?? baseURL).replace(/\/$/, '')
@@ -31,9 +41,9 @@ const noStore = { 'Cache-Control': 'no-store' }
 export function handleV1(req: Request, parts: string[]) {
   return handle(async () => {
     const a = await keyActor(req)
-    const [, , area, raw, sub] = parts // api, v1, area, id?, sub?
+    const [, , area, raw, sub, extra] = parts // api, v1, area, id?, sub?, part number or caption language?
     const m = req.method
-    if (parts.length > 5) throw new HttpError(404, 'Not found')
+    if (parts.length > ((area === 'uploads' && sub === 'parts') || (area === 'assets' && sub === 'captions') ? 6 : 5)) throw new HttpError(404, 'Not found')
     let id: string | undefined
     try {
       id = raw === undefined ? undefined : decodeURIComponent(raw)
@@ -67,6 +77,14 @@ export function handleV1(req: Request, parts: string[]) {
         requireScope(a, 'full')
         return retry(a, id)
       }
+      if (id && sub === 'captions') {
+        requireScope(a, m === 'GET' ? 'read' : 'full')
+        return captions(a, req, id, extra)
+      }
+      if (id && sub === 'playback-token' && m === 'POST') {
+        requireScope(a, 'read')
+        return playbackToken(a, req, id)
+      }
     }
 
     if (area === 'uploads') {
@@ -74,6 +92,13 @@ export function handleV1(req: Request, parts: string[]) {
       if (!id && m === 'POST') return startUpload(a, req)
       if (id && !sub && m === 'PUT') return receiveUpload(a, req, id)
       if (id && sub === 'complete' && m === 'POST') return completeUpload(a, id)
+      if (id && sub === 'parts' && extra === undefined && (m === 'GET' || m === 'POST')) return uploadParts(a, req, id)
+      if (id && sub === 'parts' && extra !== undefined && m === 'PUT') return receivePart(a, req, id, Number(extra))
+    }
+
+    if (area === 'analytics' && !id && m === 'GET') {
+      requireScope(a, 'read')
+      return analyticsFor(a.orgId, req)
     }
 
     if (area === 'folders' && !id && m === 'GET') {

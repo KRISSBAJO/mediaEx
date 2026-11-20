@@ -157,6 +157,91 @@ create table if not exists "webhook_delivery" (
 create index if not exists "webhook_delivery_due_idx" on "webhook_delivery" ("nextAttemptAt") where "status" = 'pending';
 create index if not exists "webhook_delivery_org_idx" on "webhook_delivery" ("organizationId", "createdAt" desc);
 
+-- signed playback: per-asset policy and the workspace secret that signs playback tokens (see playback.mts)
+alter table "asset" add column if not exists "playback" text not null default 'public';
+alter table "workspace_setting" add column if not exists "playbackSecret" text;
+
+-- extra codecs (encoding.mts): the workspace's choice, and each asset's extra HLS ladders { hevc: key, av1: key }
+alter table "workspace_setting" add column if not exists "extraCodecs" text[] not null default '{}';
+alter table "asset" add column if not exists "playlists" jsonb not null default '{}'::jsonb;
+
+-- captions: one WebVTT track per asset and language (see captions.mts); "auto" is a transcription in progress
+create table if not exists "caption" (
+  "assetId"       text not null references "asset"("id") on delete cascade,
+  "lang"          text not null,
+  "label"         text not null,
+  "source"        text not null default 'upload',
+  "status"        text not null default 'ready',
+  "error"         text,
+  "key"           text,
+  "hint"          text,
+  "attempts"      integer not null default 0,
+  "nextAttemptAt" timestamptz not null default now(),
+  "createdAt"     timestamptz not null default now(),
+  "updatedAt"     timestamptz not null default now(),
+  primary key ("assetId", "lang")
+);
+create index if not exists "caption_queue_idx" on "caption" ("nextAttemptAt") where "status" = 'queued';
+alter table "workspace_setting" add column if not exists "autoCaptions" boolean not null default false;
+
+-- billing (see billing.mts): one subscription per workspace, provider events seen (for retries), Paystack plan codes
+create table if not exists "subscription" (
+  "organizationId"     text primary key references "organization"("id") on delete cascade,
+  "plan"               text not null default 'creator',
+  "interval"           text,
+  "provider"           text,
+  "customerId"         text,
+  "subscriptionId"     text,
+  "emailToken"         text,
+  "status"             text not null default 'active',
+  "currentPeriodStart" timestamptz,
+  "currentPeriodEnd"   timestamptz,
+  "cancelAtPeriodEnd"  boolean not null default false,
+  "updatedAt"          timestamptz not null default now()
+);
+create index if not exists "subscription_customer_idx" on "subscription" ("provider", "customerId");
+create table if not exists "billing_event" (
+  "provider"   text not null,
+  "eventId"    text not null,
+  "type"       text not null,
+  "receivedAt" timestamptz not null default now(),
+  primary key ("provider", "eventId")
+);
+create table if not exists "billing_plan" (
+  "provider" text not null,
+  "plan"     text not null,
+  "interval" text not null,
+  "currency" text not null,
+  "amount"   real not null,
+  "code"     text not null,
+  primary key ("provider", "plan", "interval", "currency", "amount")
+);
+
+-- multipart uploads in progress: { uploadId, partSize, partCount } until the parts are joined (see routes.mts)
+alter table "asset" add column if not exists "upload" jsonb;
+
+-- view analytics: one row per viewing, updated by the player's heartbeat (see analytics.mts)
+create table if not exists "view_session" (
+  "id"             text primary key,
+  "assetId"        text not null references "asset"("id") on delete cascade,
+  "organizationId" text not null references "organization"("id") on delete cascade,
+  "viewerId"       text not null,
+  "startedAt"      timestamptz not null default now(),
+  "lastSeenAt"     timestamptz not null default now(),
+  "watchSeconds"   real not null default 0,
+  "maxPosition"    real not null default 0,
+  "startupMs"      integer,
+  "rebufferMs"     integer not null default 0,
+  "bytes"          bigint not null default 0,
+  "errors"         integer not null default 0,
+  "device"         text not null default 'Desktop',
+  "country"        text,
+  "referrer"       text,
+  "localHour"      smallint
+);
+create index if not exists "view_session_org_idx" on "view_session" ("organizationId", "startedAt");
+create index if not exists "view_session_asset_idx" on "view_session" ("assetId", "startedAt");
+
 -- cached on-the-fly transformations (the files live under <asset>/derived/)
 create table if not exists "asset_variant" (
   "assetId"   text not null references "asset"("id") on delete cascade,

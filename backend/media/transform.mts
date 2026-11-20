@@ -253,6 +253,7 @@ export async function transform(req: Request, id: string, canView: (a: AssetRow)
   const params = new URLSearchParams(url.searchParams)
   const preview = params.get('preview') === '1'
   params.delete('preview')
+  params.delete('token') // a signed-playback token (checked by canView), not part of the transformation
   if (preview && !(await isMember(a))) throw new HttpError(403, 'Previews are for members of the workspace.')
   const hasAlpha = a.type === 'image' && /\.(png|webp|avif|gif|tiff?)$/i.test(a.originalKey)
   const t = parseTransform(params, req.headers.get('accept'), hasAlpha)

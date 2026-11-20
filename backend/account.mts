@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { auth, personalWorkspaceName, pool } from './auth.mts'
+import { PLANS, planOf } from './media/billing.mts'
 
 type Workspace = { id: string; name: string; slug: string; createdAt: Date; role: string }
 
@@ -48,10 +49,16 @@ export async function getAccount(headers: Headers) {
       [active.id, session.id, user.id, session.activeOrganizationId ?? null],
     )
   }
+  const plan = await planOf(active.id)
   const initials = user.name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('') || '?'
   return {
     user: { id: user.id, name: user.name, email: user.email, emailVerified: user.emailVerified, initials },
-    workspace: { ...summary(active), role: active.role.split(',')[0], createdAt: new Date(active.createdAt).toISOString() },
+    workspace: {
+      ...summary(active),
+      role: active.role.split(',')[0],
+      createdAt: new Date(active.createdAt).toISOString(),
+      plan: { id: plan, name: PLANS[plan].name, storageLimit: PLANS[plan].storageBytes ?? 10e12 },
+    },
     workspaces: workspaces.map(summary),
   }
 }

@@ -86,10 +86,11 @@ export async function proxyAuth(request: Request) {
  */
 export async function proxyMedia(request: Request) {
   const incoming = new URL(request.url)
-  if (!/^\/api\/(assets|uploads|media|folders|collections|tags|searches|fields|moderation|keys|webhooks|v1)(\/|$)/.test(incoming.pathname)) return new Response(null, { status: 404 })
+  if (!/^\/api\/(assets|uploads|media|folders|collections|tags|searches|fields|moderation|keys|webhooks|v1|playback|analytics|encoding|billing)(\/|$)/.test(incoming.pathname)) return new Response(null, { status: 404 })
 
   const headers = new Headers()
-  for (const name of ['accept', 'content-type', 'content-length', 'range', 'if-none-match', 'if-modified-since', 'origin', 'referer', 'user-agent']) {
+  // country headers some CDNs add feed view analytics; payment providers sign their webhooks
+  for (const name of ['accept', 'content-type', 'content-length', 'range', 'if-none-match', 'if-modified-since', 'origin', 'referer', 'user-agent', 'cf-ipcountry', 'x-vercel-ip-country', 'cloudfront-viewer-country', 'stripe-signature', 'x-paystack-signature']) {
     const value = request.headers.get(name)
     if (value !== null) headers.set(name, value)
   }

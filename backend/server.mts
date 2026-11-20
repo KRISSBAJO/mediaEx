@@ -7,6 +7,7 @@ import { getAccount, getInvitation } from './account.mts'
 import { handleMedia, isDurable } from './media/routes.mts'
 import { storage } from './media/storage.mts'
 import { startWorker } from './media/worker.mts'
+import { startCaptioner } from './media/captions.mts'
 import { startDispatcher } from './media/webhooks.mts'
 
 const frontend = new URL(baseURL)
@@ -86,7 +87,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   req.headers['x-forwarded-proto'] = frontend.protocol.slice(0, -1)
   res.setHeader('cache-control', 'no-store')
   if (pathname.startsWith('/api/auth/')) return await authHandler(req, res)
-  if (/^\/api\/(assets|uploads|media|folders|collections|tags|searches|fields|moderation|keys|webhooks|v1)(\/|$)/.test(pathname)) {
+  if (/^\/api\/(assets|uploads|media|folders|collections|tags|searches|fields|moderation|keys|webhooks|v1|playback|analytics|encoding|billing)(\/|$)/.test(pathname)) {
     const response = await handleMedia(toWebRequest(req, pathname), pathname)
     if (response) return await sendWeb(res, response)
   }
@@ -119,7 +120,10 @@ server.listen(port, '0.0.0.0', () => {
   const kind = storage().kind
   console.log(`MediaEX media storage: ${kind === 's3' ? 'S3-compatible bucket' : 'local disk'}${isDurable() ? '' : ' (not durable: set S3_* or mount MEDIA_DIR)'}`)
   // the media pipeline worker shares this process; MEDIA_WORKER=off runs an API-only instance
-  if (process.env.MEDIA_WORKER !== 'off') startWorker()
+  if (process.env.MEDIA_WORKER !== 'off') {
+    startWorker()
+    startCaptioner()
+  }
   // webhook deliveries are claimed from Postgres, so every instance can help send them
   startDispatcher()
 })

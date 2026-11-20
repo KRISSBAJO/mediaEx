@@ -37,13 +37,18 @@ export type MediaAsset = {
   createdBy: string | null // display name
   thumbUrl: string | null
   posterUrl: string | null
-  playbackUrl: string | null // HLS playlist for video/audio
+  playbackUrl: string | null // HLS playlist for video/audio (H.264 for video: plays everywhere)
+  /** extra video ladders when the workspace has them on: HEVC and AV1 HLS playlists */
+  playbackUrls: Partial<Record<ExtraCodec, string | null>>
+  captions: CaptionTrack[]
   folderId: string | null
   collectionIds: string[]
   metadata: Record<string, unknown> // { fieldId: value }
   moderation: ModerationState
   moderationFlags: ModerationFlag[]
   moderationNote: string | null
+  /** public: anyone with the link can watch; signed: viewers need a playback token (members never do) */
+  playback: 'public' | 'signed'
 }
 
 /* ------------------------------------------------ developer platform */
@@ -52,7 +57,7 @@ export type KeyScope = (typeof KEY_SCOPES)[number]
 export const KEY_SCOPE_LABEL: Record<KeyScope, string> = { read: 'Read only', upload: 'Upload', full: 'Full access' }
 export type ApiKey = { id: string; name: string; scope: KeyScope; last4: string; createdAt: string; lastUsedAt: string | null; createdBy: string | null }
 
-export const WEBHOOK_EVENTS = ['asset.ready', 'asset.failed', 'asset.deleted', 'asset.review_required', 'asset.approved', 'asset.rejected'] as const
+export const WEBHOOK_EVENTS = ['asset.ready', 'asset.failed', 'asset.deleted', 'asset.review_required', 'asset.approved', 'asset.rejected', 'asset.captions_ready'] as const
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number]
 export const WEBHOOK_EVENT_HELP: Record<WebhookEvent, string> = {
   'asset.ready': 'An upload finished processing and can stream',
@@ -61,6 +66,7 @@ export const WEBHOOK_EVENT_HELP: Record<WebhookEvent, string> = {
   'asset.review_required': 'Moderation is holding an upload for review',
   'asset.approved': 'Someone approved an asset in review',
   'asset.rejected': 'Someone rejected an asset in review',
+  'asset.captions_ready': 'Automatic captions finished for an asset',
 }
 export type WebhookEndpoint = {
   id: string
@@ -208,3 +214,83 @@ export const ACCEPT_ATTR = [
     .flat()
     .map((e) => `.${e}`),
 ].join(',')
+
+/* ------------------------------------------------ analytics (see analytics.mts) */
+export type AnalyticsRange = '7d' | '30d' | '90d'
+export type AnalyticsReport = {
+  range: AnalyticsRange
+  from: string
+  to: string
+  totals: {
+    views: number
+    uniqueViewers: number
+    watchHours: number
+    avgViewSeconds: number
+    avgStartupMs: number | null
+    rebufferRatio: number // 0–1
+    bytesDelivered: number
+    errorRate: number // 0–1
+    completionRate: number // 0–1
+  }
+  /** change against the previous period of the same length, as a fraction (0.12 = +12%) */
+  change: { views: number | null; uniqueViewers: number | null; watchHours: number | null; avgViewSeconds: number | null; avgStartupMs: number | null; rebufferRatio: number | null; bytesDelivered: number | null }
+  daily: { date: string; views: number; watchHours: number; viewers: number }[]
+  hours: { hour: number; views: number }[] // viewer's local hour
+  retention: { position: number; share: number }[] // position and share in %
+  countries: { country: string | null; views: number }[]
+  devices: { device: string; share: number }[] // % of watch time
+  sources: { referrer: string | null; views: number }[]
+  topAssets: { id: string; title: string; type: string; views: number; watchHours: number; completionRate: number }[]
+  quality: { country: string | null; views: number; avgStartupMs: number | null; rebufferRatio: number; errorRate: number }[]
+}
+
+/* ------------------------------------------------ encoding (see encoding.mts) */
+export type ExtraCodec = 'hevc' | 'av1'
+export type EncodingSettings = {
+  extraCodecs: ExtraCodec[]
+  /** what this server's FFmpeg can encode */
+  available: Record<ExtraCodec, boolean>
+  /** 'nvenc' or 'qsv' when a GPU encoder is configured and present */
+  hardware: string | null
+  av1Encoder: string | null
+  /** transcribe new uploads automatically (needs OPENAI_API_KEY on the server) */
+  autoCaptions: boolean
+  captionsAvailable: boolean
+}
+
+/* ------------------------------------------------ captions (see captions.mts) */
+export type CaptionTrack = {
+  lang: string // "en", or "auto" while a transcription is running
+  label: string
+  source: 'auto' | 'upload'
+  status: 'queued' | 'processing' | 'ready' | 'failed'
+  error: string | null
+  url: string | null // the .vtt, once ready
+}
+
+/* ------------------------------------------------ billing (see billing.mts) */
+export type PlanId = 'creator' | 'pro' | 'studio'
+export type BillingInterval = 'month' | 'year'
+export type BillingState = {
+  plan: PlanId
+  planName: string
+  interval: BillingInterval | null
+  status: 'free' | 'active' | 'past_due' | 'canceled' | 'incomplete'
+  cancelAtPeriodEnd: boolean
+  currentPeriodEnd: string | null
+  /** which provider takes payments on this server; null when billing isn't set up */
+  provider: 'stripe' | 'paystack' | null
+  /** a card on file with the active provider, so "Manage billing" can open */
+  manageable: boolean
+  usage: {
+    storageBytes: number
+    storageLimit: number
+    /** Studio only: storage past the 10 TB included, billed as you go */
+    storageOverage: number
+    minutes: number
+    minutesLimit: number | null
+    periodStart: string
+    periodEnd: string
+  }
+  prices: { plan: PlanId; interval: BillingInterval; amount: number; currency: string }[]
+}

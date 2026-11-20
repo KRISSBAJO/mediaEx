@@ -5,7 +5,16 @@ import { createContext, useContext } from 'react'
 export type Role = 'owner' | 'admin' | 'member'
 export type Account = {
   user: { id: string; name: string; email: string; initials: string; emailVerified: boolean }
-  workspace: { id: string; name: string; slug: string; initial: string; role: Role; createdAt: string }
+  workspace: {
+    id: string
+    name: string
+    slug: string
+    initial: string
+    role: Role
+    createdAt: string
+    /** the plan right now (see backend/media/billing.mts) */
+    plan: { id: 'creator' | 'pro' | 'studio'; name: string; storageLimit: number }
+  }
   workspaces: { id: string; name: string; slug: string; initial: string }[]
 }
 
