@@ -5,7 +5,8 @@
  * and the upload queue (kept here so uploads continue while you move between pages).
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { guessType, isActive, type MediaAsset } from '@/lib/media/types'
+import { guessType, isActive, type MediaAsset, type WorkspaceAssetSummary } from '@/lib/media/types'
+import { useAccount } from './account'
 import { toast } from './ui'
 
 export type Transfer = {
@@ -17,6 +18,7 @@ export type Transfer = {
   state: 'waiting' | 'uploading' | 'done' | 'error' | 'cancelled'
   error?: string
   folderId: string | null
+  presetId: string | null
   /** sent in parts: survives dropped connections, and can be resumed by adding the same file again */
   resumable?: boolean
   /** picked up where an earlier, interrupted upload stopped */
@@ -25,6 +27,7 @@ export type Transfer = {
 
 type Media = {
   assets: MediaAsset[]
+  summary: WorkspaceAssetSummary
   loaded: boolean
   refresh: () => Promise<void>
   get: (id: string) => MediaAsset | undefined
@@ -34,7 +37,7 @@ type Media = {
   update: (id: string, patch: { title?: string; tags?: string[]; folderId?: string | null; metadata?: Record<string, unknown>; playback?: 'public' | 'signed' }) => Promise<boolean>
   retry: (id: string) => Promise<boolean>
   transfers: Transfer[]
-  upload: (files: FileList | File[], folderId?: string | null) => void
+  upload: (files: FileList | File[], folderId?: string | null, presetId?: string | null) => void
   cancel: (key: string) => void
   clearFinished: () => void
 }
@@ -103,8 +106,10 @@ function putBlob(t: Target, blob: Blob, type: string, onProgress: (n: number) =>
   })
 }
 
-export function MediaProvider({ initial, children }: { initial: MediaAsset[]; children: React.ReactNode }) {
+export function MediaProvider({ initial, initialSummary, children }: { initial: MediaAsset[]; initialSummary: WorkspaceAssetSummary; children: React.ReactNode }) {
+  const { workspace } = useAccount()
   const [assets, setAssets] = useState(initial)
+  const [summary, setSummary] = useState(initialSummary)
   const [loaded, setLoaded] = useState(true)
   const [transfers, setTransfers] = useState<Transfer[]>([])
   const files = useRef(new Map<string, File>())
@@ -116,10 +121,14 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
   const transfersRef = useRef(transfers)
   transfersRef.current = transfers
 
+  const latestRefresh = useRef(0)
   const refresh = useCallback(async () => {
+    const request = ++latestRefresh.current
     try {
-      const { assets } = await json<{ assets: MediaAsset[] }>(await fetch('/api/assets', { cache: 'no-store' }))
+      const { assets, summary } = await json<{ assets: MediaAsset[]; summary: WorkspaceAssetSummary }>(await fetch('/api/assets?view=recent', { cache: 'no-store' }))
+      if (request !== latestRefresh.current) return
       setAssets(assets)
+      setSummary(summary)
       setLoaded(true)
     } catch {
       /* keep what we have; the next poll tries again */
@@ -127,7 +136,7 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
   }, [])
 
   // poll quickly while something is moving through the pipeline, slowly otherwise
-  const busy = assets.some(isActive) || transfers.some((t) => t.state === 'uploading' || t.state === 'waiting')
+  const busy = summary.active > 0 || assets.some(isActive) || transfers.some((t) => t.state === 'uploading' || t.state === 'waiting')
   useEffect(() => {
     const id = setInterval(() => {
       if (document.visibilityState === 'visible') void refresh()
@@ -147,12 +156,13 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
       const res = await fetch(`/api/assets/${id}`, { method: 'DELETE' })
       if (!res.ok && res.status !== 404) await json(res)
       setAssets((xs) => xs.filter((x) => x.id !== id))
+      await refresh()
       return true
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Couldn’t delete the asset.')
       return false
     }
-  }, [])
+  }, [refresh])
 
   const update = useCallback(
     async (id: string, patch: { title?: string; tags?: string[]; folderId?: string | null; metadata?: Record<string, unknown>; playback?: 'public' | 'signed' }) => {
@@ -253,7 +263,7 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
       if (!file || started.current.has(t.key)) return
       started.current.add(t.key)
       patchT(t.key, { state: 'uploading', loaded: 0 })
-      const fp = fingerprint(file)
+      const fp = JSON.stringify([workspace.id, t.presetId, t.folderId, fingerprint(file)])
       const big = file.size >= MULTIPART_FROM
       let assetId: string | null = null
       let multipart = false
@@ -279,7 +289,7 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
             await fetch('/api/uploads', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ fileName: file.name, size: file.size, mimeType: file.type || null, folderId: t.folderId, multipart: big }),
+              body: JSON.stringify({ fileName: file.name, size: file.size, mimeType: file.type || null, folderId: t.folderId, presetId: t.presetId, multipart: big }),
             }),
           )
           assetId = asset.id
@@ -319,7 +329,7 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
         files.current.delete(t.key)
       }
     },
-    [put],
+    [put, workspace.id],
   )
 
   // start waiting transfers, a couple at a time
@@ -338,7 +348,7 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
     return () => window.removeEventListener('beforeunload', warn)
   }, [uploading])
 
-  const upload = useCallback((list: FileList | File[], folderId: string | null = null) => {
+  const upload = useCallback((list: FileList | File[], folderId: string | null = null, presetId: string | null = null) => {
     const arr = Array.from(list)
     const ok = arr.filter((f) => guessType(f.name, f.type))
     const skipped = arr.length - ok.length
@@ -347,7 +357,7 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
     const added = ok.map((f, i) => {
       const key = `${Date.now()}-${i}-${f.name}`
       files.current.set(key, f)
-      return { key, assetId: null, name: f.name, size: f.size, loaded: 0, state: 'waiting' as const, folderId }
+      return { key, assetId: null, name: f.name, size: f.size, loaded: 0, state: 'waiting' as const, folderId, presetId }
     })
     setTransfers((ts) => [...added, ...ts])
   }, [])
@@ -366,8 +376,8 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
   const clearFinished = useCallback(() => setTransfers((ts) => ts.filter((t) => t.state === 'uploading' || t.state === 'waiting')), [])
 
   const value = useMemo<Media>(
-    () => ({ assets, loaded, refresh, get: (id) => assets.find((a) => a.id === id), put, remove, update, retry, transfers, upload, cancel, clearFinished }),
-    [assets, loaded, refresh, put, remove, update, retry, transfers, upload, cancel, clearFinished],
+    () => ({ assets, summary, loaded, refresh, get: (id) => assets.find((a) => a.id === id), put, remove, update, retry, transfers, upload, cancel, clearFinished }),
+    [assets, summary, loaded, refresh, put, remove, update, retry, transfers, upload, cancel, clearFinished],
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
