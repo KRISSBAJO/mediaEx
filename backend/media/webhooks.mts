@@ -101,6 +101,28 @@ export function sign(secret: string, body: string, t = Math.floor(Date.now() / 1
   return `t=${t},v1=${createHmac('sha256', secret).update(`${t}.${body}`).digest('hex')}`
 }
 
+/** fetch() reports every network failure as "fetch failed"; the cause says what actually went wrong. */
+function networkError(e: Error) {
+  const cause = (e as Error & { cause?: { code?: string; message?: string } }).cause
+  const code = cause?.code ?? ''
+  const known: Record<string, string> = {
+    ENOTFOUND: 'The host name doesn’t resolve',
+    EAI_AGAIN: 'DNS lookup failed; will retry',
+    ECONNREFUSED: 'Connection refused',
+    ECONNRESET: 'The connection was reset',
+    ETIMEDOUT: 'The connection timed out',
+    EHOSTUNREACH: 'The host is unreachable',
+    ENETUNREACH: 'The network is unreachable',
+    CERT_HAS_EXPIRED: 'Its TLS certificate has expired',
+    DEPTH_ZERO_SELF_SIGNED_CERT: 'Its TLS certificate is self-signed',
+    SELF_SIGNED_CERT_IN_CHAIN: 'Its TLS certificate chain is self-signed',
+    UNABLE_TO_VERIFY_LEAF_SIGNATURE: 'Its TLS certificate can’t be verified',
+    ERR_TLS_CERT_ALTNAME_INVALID: 'Its TLS certificate doesn’t match the host name',
+  }
+  if (known[code]) return `${known[code]} (${code})`
+  return (cause?.message ? `${e.message}: ${cause.message}` : e.message).slice(0, 300)
+}
+
 async function deliver(d: { id: string; endpointId: string; payload: unknown; attempts: number; url: string; secret: string; event: string }) {
   const body = JSON.stringify(d.payload)
   const t0 = Date.now()
@@ -125,7 +147,7 @@ async function deliver(d: { id: string; endpointId: string; payload: unknown; at
     status = res.status
     responseBody = (await res.text().catch(() => '')).slice(0, 1000)
   } catch (e) {
-    error = e instanceof HttpError ? e.message : e instanceof Error && e.name === 'TimeoutError' ? `No answer within ${TIMEOUT_MS / 1000} s` : e instanceof Error ? e.message.slice(0, 300) : 'Request failed'
+    error = e instanceof HttpError ? e.message : e instanceof Error && e.name === 'TimeoutError' ? `No answer within ${TIMEOUT_MS / 1000} s` : e instanceof Error ? networkError(e) : 'Request failed'
   }
   const ms = Date.now() - t0
   const ok = status !== null && status >= 200 && status < 300

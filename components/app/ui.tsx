@@ -254,3 +254,19 @@ export async function copyText(text: string, what = 'Copied to clipboard') {
     toast('Copy failed — select the text and copy it manually')
   }
 }
+
+/** A panel that couldn't load: says what failed, with the server's reason and a way to try again. */
+export function LoadFailed({ what, detail, onRetry }: { what: string; detail?: string; onRetry?: () => void }) {
+  return (
+    <div className="banner is-bad" role="alert">
+      <Icon name="alert" />
+      <div>
+        <b>Couldn’t load {what}.</b> {detail}
+        <small>If this keeps happening, the API may not be reachable from the dashboard. Reloading the page usually fixes a one-off.</small>
+      </div>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry ?? (() => window.location.reload())}>
+        Try again
+      </button>
+    </div>
+  )
+}

@@ -9,7 +9,7 @@ import type { BillingInterval, BillingState, PlanId } from '@/lib/media/types'
 import { request } from '../library'
 import { canManage, useAccount, type Role } from '../account'
 import Icon from '../Icon'
-import { Avatar, Card, Meter, PageHead, toast } from '../ui'
+import { Avatar, Card, LoadFailed, Meter, PageHead, toast } from '../ui'
 import SettingsMetadata from './SettingsMetadata'
 import SettingsModeration from './SettingsModeration'
 import SettingsEncoding from './SettingsEncoding'
@@ -449,10 +449,11 @@ function Billing() {
   const [interval, setInterval_] = useState<BillingInterval>('year')
   const [busy, setBusy] = useState<string | null>(null)
   const [confirmCancel, setConfirmCancel] = useState(false)
+  const [failed, setFailed] = useState('')
   const load = useCallback(() => {
     request<BillingState>('/api/billing')
-      .then(setB)
-      .catch((e) => toast(e instanceof Error ? e.message : 'Couldn’t load billing.'))
+      .then((x) => (setFailed(''), setB(x)))
+      .catch((e) => setFailed(e instanceof Error ? e.message : 'Couldn’t load billing.'))
   }, [])
   useEffect(load, [load])
   // back from checkout: the provider's webhook may land a moment later
@@ -463,6 +464,7 @@ function Billing() {
     return () => clearTimeout(t)
   }, [params, load])
 
+  if (failed && !b) return <LoadFailed what="billing" detail={failed} onRetry={load} />
   if (!b) return <p className="quiet-note">Loading…</p>
   const go = async (path: string, json?: unknown) => {
     setBusy(path)
