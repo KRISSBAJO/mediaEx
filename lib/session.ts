@@ -2,7 +2,7 @@ import { headers } from 'next/headers'
 import { notFound, redirect } from 'next/navigation'
 import { cache } from 'react'
 import type { Account } from '@/components/app/account'
-import type { MediaAsset } from '@/lib/media/types'
+import type { MediaAsset, WorkspaceAssetSummary } from '@/lib/media/types'
 import { authCookies, backendFetch } from './backend'
 
 async function readAuthenticated(path: string) {
@@ -25,14 +25,16 @@ export async function requireAccount(): Promise<Account> {
 }
 
 /** The active workspace's assets, for the dashboard's first render (the browser keeps them fresh afterwards). */
-export async function getWorkspaceAssets(): Promise<MediaAsset[]> {
+export async function getWorkspaceAssets(): Promise<{ assets: MediaAsset[]; summary: WorkspaceAssetSummary }> {
   const cookie = authCookies(await headers())
-  if (!cookie) return []
-  const response = await backendFetch('/api/assets', { headers: { cookie } })
-  // 401 signed out, 423 the workspace is suspended (the dashboard shows why)
-  if (response.status === 401 || response.status === 423) return []
+  if (!cookie) redirect('/sign-in?next=%2Fdashboard')
+  const response = await backendFetch('/api/assets?view=recent', { headers: { cookie } })
+  if (response.status === 401) redirect('/sign-in?next=%2Fdashboard')
+  if (response.status === 423) {
+    return { assets: [], summary: { total: 0, unfiled: 0, committedBytes: 0, uploaded: 0, active: 0, failed: 0, pending: 0, bytes: 0, video: 0, audio: 0, image: 0 } }
+  }
   if (!response.ok) throw new Error(`MediaEX API could not load the media (HTTP ${response.status}).`)
-  return ((await response.json()) as { assets: MediaAsset[] }).assets
+  return response.json()
 }
 
 /** One asset in the active workspace, or null when it doesn't exist there. */
@@ -40,7 +42,7 @@ export async function getWorkspaceAsset(id: string): Promise<MediaAsset | null> 
   const cookie = authCookies(await headers())
   if (!cookie || !/^ast_[a-z0-9]+$/.test(id)) return null
   const response = await backendFetch(`/api/assets/${id}`, { headers: { cookie } })
-  if (response.status === 401 || response.status === 403 || response.status === 404) return null
+  if ([401, 403, 404, 423].includes(response.status)) return null
   if (!response.ok) throw new Error(`MediaEX API could not load the asset (HTTP ${response.status}).`)
   return ((await response.json()) as { asset: MediaAsset }).asset
 }
