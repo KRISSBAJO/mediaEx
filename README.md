@@ -62,6 +62,7 @@ The API image ships Node.js, the PostgreSQL-backed account service and the media
 | `PUBLIC_API_URL` | Optional. The origin API callers use, if it differs from `BETTER_AUTH_URL` (used in upload URLs handed to key callers) |
 | `MEDIA_HW_ENCODER` | Optional. `nvenc` (NVIDIA) or `qsv` (Intel Quick Sync) to encode on the GPU. Needs an FFmpeg build with those encoders (the default image's Alpine FFmpeg has neither); anything the GPU can't do falls back to the CPU |
 | `OPENAI_API_KEY` | Optional. Turns on automatic captions (OpenAI Whisper). `OPENAI_TRANSCRIBE_MODEL` (default `whisper-1`) and `OPENAI_BASE_URL` change the model and endpoint |
+| `NEXT_PUBLIC_LEGAL_EMAIL` | Frontend, build time. The contact address on `/terms` and `/privacy` |
 | `BILLING_PROVIDER` | `stripe` or `paystack`. Without it, whichever of the two has a key is used; with neither, every workspace stays on Creator |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Stripe billing. Point a webhook at `<BETTER_AUTH_URL>/api/billing/webhook/stripe` for `checkout.session.completed`, `customer.subscription.*` and `invoice.payment_failed`, and turn on the Customer Portal |
 | `PAYSTACK_SECRET_KEY`, `PAYSTACK_CURRENCY`, `PAYSTACK_PRICES` | Paystack billing. Webhook URL `<BETTER_AUTH_URL>/api/billing/webhook/paystack`. `PAYSTACK_CURRENCY` defaults to NGN; for anything but USD set `PAYSTACK_PRICES="pro_month=…,pro_year=…,studio_month=…,studio_year=…"` in that currency's main unit |

@@ -83,7 +83,11 @@ export default function Footer() {
       </div>
 
       <div className="footer-base">
-        <span>© {new Date().getFullYear()} MediaEX, Inc.</span>
+        <span className="footer-legal">
+          © {new Date().getFullYear()} MediaEX, Inc.
+          <a href="/terms">Terms</a>
+          <a href="/privacy">Privacy</a>
+        </span>
         <Clocks />
         <div className="footer-social">
           <a href="#top" className="footer-up" aria-label="Back to top">

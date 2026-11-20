@@ -12,9 +12,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <main className="auth-form-wrap">{children}</main>
         <footer className="auth-foot">
           <span>© {new Date().getFullYear()} MediaEX</span>
-          <a href="#">Privacy</a>
-          <a href="#">Terms</a>
-          <a href="#">Status</a>
+          <Link href="/terms">Terms</Link>
+          <Link href="/privacy">Privacy</Link>
         </footer>
       </div>
 

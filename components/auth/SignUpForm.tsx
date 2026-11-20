@@ -81,7 +81,7 @@ export default function SignUpForm({ next, social }: { next: string; social: Soc
         {formError && <FormNote tone="error">{formError}</FormNote>}
         <SubmitButton loading={loading}>Create account</SubmitButton>
         <p className="auth-legal">
-          By creating an account you agree to the <a href="#">Terms</a> and <a href="#">Privacy Policy</a>.
+          By creating an account you agree to the <Link href="/terms">Terms</Link> and <Link href="/privacy">Privacy Policy</Link>.
         </p>
       </form>
       <p className="auth-switch">
