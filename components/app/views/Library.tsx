@@ -288,7 +288,6 @@ export default function Library() {
               <>
                 <span className="lib-count">{loading && found !== null ? 'Searching…' : !page ? '' : `Showing ${list.length} of ${n(page.total)}`}</span>
                 <span className="grow" />
-                <span className="lib-hint">Click to preview · ⇧ / ⌘ click or tick to select · drag onto a folder</span>
                 <div className="seg seg-icon" role="group" aria-label="Layout">
                   <button type="button" aria-label="Grid" aria-pressed={view === 'grid'} className={view === 'grid' ? 'is-on' : ''} onClick={() => setView('grid')}>
                     <Icon name="grid" size={16} />
@@ -331,6 +330,7 @@ export default function Library() {
               </div>
             </Card>
           ) : view === 'grid' ? (
+            <>
             <div className={`asset-grid ${selecting ? 'is-selecting' : ''}`}>
               {list.map((a) => {
                 const on = selected.has(a.id)
@@ -366,7 +366,7 @@ export default function Library() {
                       <div className="asset-card-meta">
                         <span>
                           <TypeIcon type={a.type} />
-                          {a.type === 'image' ? dims(a) : fmtDuration(Math.round(a.duration))}
+                          {a.type === 'image' ? dims(a) : a.duration > 0 ? fmtDuration(Math.round(a.duration)) : a.type === 'audio' ? 'Audio' : 'Video'}
                         </span>
                         {a.status === 'ready' && a.moderation !== 'approved' ? (
                           <ModerationBadge state={a.moderation} />
@@ -383,6 +383,8 @@ export default function Library() {
                 )
               })}
             </div>
+            <p className="lib-hint">Click a card to preview it, double-click to open it. Shift or Ctrl-click to select several, then drag them onto a folder.</p>
+            </>
           ) : (
             <Card flush>
               <div className="table-wrap">
