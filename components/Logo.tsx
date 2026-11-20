@@ -1,8 +1,17 @@
-export default function Logo({ size = 28 }: { size?: number }) {
+/**
+ * The MediaEX wordmark: "media" in the display grotesk, then "EX" knocked out of an orange tag whose right edge is a
+ * play arrow. The name is the logo; use this wherever the brand appears. `size` is the font size in pixels, so the
+ * whole lockup scales with it. Styles: .wordmark in app/globals.css.
+ */
+export default function Logo({ size = 20, className = '' }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="1" y="1" width="30" height="30" rx="9" fill="#ff5b1f" />
-      <path d="M12 9.5v13l10.5-6.5L12 9.5Z" fill="#0a0a0a" />
-    </svg>
+    <span className={`wordmark ${className}`} style={{ fontSize: size }} role="img" aria-label="MediaEX">
+      <span className="wm-media" aria-hidden="true">
+        media
+      </span>
+      <span className="wm-ex" aria-hidden="true">
+        EX
+      </span>
+    </span>
   )
 }

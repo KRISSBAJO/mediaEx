@@ -93,10 +93,7 @@ export default function Footer() {
       <div className="footer-top">
         <div className="footer-brand">
           <a href="#top" className="brand">
-            <Logo />
-            <span>
-              Media<b>EX</b>
-            </span>
+            <Logo size={24} />
           </a>
           <p>The media cloud for creators and studios. Upload once, stream everywhere.</p>
           <a href="#top" className="footer-status">
@@ -125,7 +122,9 @@ export default function Footer() {
       </nav>
 
       <div className="footer-mark" aria-hidden="true">
-        <span>MediaEX</span>
+        <span>
+          media<em>EX</em>
+        </span>
         <i />
       </div>
 

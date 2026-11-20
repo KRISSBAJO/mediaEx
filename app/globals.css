@@ -222,6 +222,43 @@ main,
 .brand b {
   color: inherit;
 }
+
+/* the wordmark (components/Logo.tsx): "media" + an orange play-tag with EX knocked out. Sized by font-size. */
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1em;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.06em;
+  color: var(--text);
+  white-space: nowrap;
+}
+.wm-media {
+  /* optical: the lowercase sits on the tag's baseline */
+  transform: translateY(-0.02em);
+}
+.wm-ex {
+  display: inline-grid;
+  place-items: center;
+  height: 0.92em;
+  padding: 0 0.5em 0 0.26em;
+  border-radius: 0.2em;
+  background: var(--accent);
+  color: #0a0a0a;
+  font-size: 0.8em;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  /* the right edge is a play arrow */
+  clip-path: polygon(0 0, calc(100% - 0.34em) 0, 100% 50%, calc(100% - 0.34em) 100%, 0 100%);
+  transition: transform 0.35s var(--ease);
+}
+a:hover > .wordmark .wm-ex,
+a:focus-visible > .wordmark .wm-ex {
+  transform: translateX(0.08em);
+}
 .nav-links {
   position: relative;
   display: flex;
@@ -1716,7 +1753,7 @@ section[id] {
   flex-direction: column;
   justify-content: space-between;
   gap: 72px;
-  min-height: min(92vh, 900px);
+  min-height: min(84vh, 820px);
   padding: 150px 56px 56px;
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -1744,19 +1781,33 @@ section[id] {
     transform: translateX(-42%) scale(1.12);
   }
 }
+/* two whole lines: the statement, then the serif payoff stepped in under it. Sized to the frame (cqi), so neither
+   line ever breaks mid-phrase on a wide screen; on narrow ones they wrap naturally. */
+.cl-frame {
+  container-type: inline-size;
+}
 .cl-title {
-  font-size: clamp(50px, 10.4vw, 164px);
+  font-size: clamp(42px, 10.4cqi, 168px);
   font-weight: 500;
-  letter-spacing: -0.06em;
-  line-height: 0.92;
+  letter-spacing: -0.058em;
+  line-height: 0.9;
 }
 .cl-line {
   display: block;
 }
 .cl-title .grad-text {
-  font-size: 1.06em;
-  letter-spacing: -0.03em;
+  margin-top: 0.06em;
+  font-size: 1.04em;
+  letter-spacing: -0.025em;
   line-height: 1;
+}
+@container (min-width: 720px) {
+  .cl-line {
+    white-space: nowrap;
+  }
+  .cl-title .grad-text {
+    padding-left: 1.15em;
+  }
 }
 /* each word rises out of its own mask */
 .cl-word {
@@ -2357,6 +2408,15 @@ section[id] {
   -webkit-background-clip: text;
   background-clip: text;
   animation: markSweep 9s linear infinite;
+}
+/* the giant mark follows the wordmark: lowercase "media", a smaller, heavier EX in outline (the sweep still runs through it) */
+.footer-mark em {
+  margin-left: 0.05em;
+  font-size: 0.8em;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  -webkit-text-stroke: 1px #2a2926;
 }
 .footer-mark i {
   position: absolute;
@@ -4250,4 +4310,615 @@ section[id] {
 }
 .shead-body h2 {
   text-wrap: balance;
+}
+
+/* ------------------------------------------------ hero tour (components/HeroReel.tsx) */
+.viewfinder {
+  transition: height 0.6s var(--ease);
+}
+.vf-meta.bottom {
+  transition: opacity 0.3s;
+}
+.vf-meta.bottom.is-hidden {
+  opacity: 0;
+}
+/* idle: the prism is the play button */
+.reel-play {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: 50%;
+  width: min(46%, 420px);
+  height: 74%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  align-items: end;
+  justify-items: center;
+  padding: 0 0 4px;
+  border: 0;
+  border-radius: 24px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+.reel-play:focus-visible {
+  outline: none;
+}
+.reel-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px 8px 11px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: rgb(var(--bg-rgb) / 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font: 500 12.5px/1 var(--font-body);
+  color: var(--muted);
+  opacity: 0;
+  animation: reelHint 0.8s var(--ease) 2.2s forwards;
+  transition: color 0.25s, border-color 0.25s, transform 0.35s var(--ease);
+}
+.reel-hint svg {
+  width: 12px;
+  height: 12px;
+  fill: var(--accent);
+}
+.reel-play:hover .reel-hint,
+.reel-play:focus-visible .reel-hint {
+  border-color: rgb(var(--acc-rgb) / 0.6);
+  color: var(--text);
+  transform: translateY(-3px);
+}
+@keyframes reelHint {
+  to {
+    opacity: 1;
+  }
+}
+
+/* playing */
+.reel-stage {
+  position: absolute;
+  z-index: 3;
+  inset: 54px 46px 66px;
+  display: grid;
+  place-items: center;
+}
+.reel-chapter {
+  width: min(660px, 100%);
+  animation: reelIn 0.6s var(--ease) both;
+}
+@keyframes reelIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(4px);
+  }
+}
+.reel-kicker {
+  margin-bottom: 18px;
+  font: 500 11.5px/1.2 var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.reel-kicker b {
+  font-weight: 500;
+  color: var(--accent);
+}
+@keyframes rcIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.rc-file,
+.rc-note,
+.rc-ladder > b,
+.rc-row > span,
+.rc-cues li,
+.rc-city,
+.rc-devices span,
+.rc-stats > div,
+.rc-link,
+.rc-end {
+  animation: rcIn 0.6s var(--ease) both var(--d, 0s);
+}
+.rc-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 18px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.rc-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text);
+}
+.rc-dot.is-warn {
+  background: var(--accent);
+}
+.rc-dot.is-good {
+  background: var(--green);
+}
+
+/* upload */
+.rc-file {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.rc-file-tag {
+  flex: none;
+  padding: 7px 8px;
+  border: 1px solid rgb(var(--acc-rgb) / 0.5);
+  border-radius: 6px;
+  font: 500 11px/1 var(--font-code);
+  color: var(--accent);
+}
+.rc-file > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.rc-file b {
+  display: block;
+  font-size: 15px;
+  font-weight: 500;
+}
+.rc-file small {
+  display: block;
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+.rc-file em {
+  font: 400 13px/1 var(--font-code);
+  font-style: normal;
+  color: var(--text);
+}
+.rc-parts {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 14px;
+}
+.rc-parts i {
+  position: relative;
+  height: 34px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.rc-parts i::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #e8e6e1;
+  transform-origin: bottom;
+  animation: rcFill 0.5s var(--ease) both var(--d);
+}
+@keyframes rcFill {
+  from {
+    transform: scaleY(0);
+  }
+}
+/* the part that drops: it goes orange first, then fills on its retry */
+.rc-parts i.is-retry {
+  animation: rcWarn 0.3s ease both calc(var(--d) - 1.1s);
+}
+.rc-parts i.is-retry::after {
+  background: var(--accent);
+}
+@keyframes rcWarn {
+  to {
+    background: rgb(var(--acc-rgb) / 0.28);
+    box-shadow: inset 0 0 0 1px rgb(var(--acc-rgb) / 0.7);
+  }
+}
+
+/* encode */
+.rc-ladder {
+  display: grid;
+  grid-template-columns: 58px repeat(3, minmax(0, 1fr));
+  gap: 12px 16px;
+  align-items: center;
+}
+.rc-ladder > b {
+  font-size: 14px;
+  font-weight: 500;
+}
+.rc-ladder > b small {
+  display: block;
+  margin-top: 4px;
+  font: 400 11.5px/1 var(--font-code);
+  color: var(--dim);
+}
+.rc-row {
+  display: contents;
+}
+.rc-row > span {
+  font: 400 12px/1 var(--font-code);
+  color: var(--muted);
+}
+.rc-row > i {
+  position: relative;
+  height: 14px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+.rc-row > i::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--w);
+  border-radius: 3px;
+  background: #d9d8d4;
+  transform-origin: left;
+  animation: rcGrow 0.7s var(--ease) both var(--d);
+}
+.rc-row > i.is-new::after {
+  background: linear-gradient(90deg, rgb(var(--acc-rgb) / 0.55), var(--accent));
+}
+@keyframes rcGrow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+/* captions */
+.rc-wave {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 78px;
+}
+.rc-wave i {
+  flex: 1;
+  height: var(--h);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.2);
+  animation: rcWave 1.1s ease-in-out infinite alternate;
+  animation-delay: calc(var(--i) * -47ms);
+}
+@keyframes rcWave {
+  to {
+    transform: scaleY(0.45);
+  }
+}
+.rc-scan {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  left: 0;
+  width: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 12px rgb(var(--acc-rgb) / 0.8);
+  animation: rcScan 3.4s linear both 0.2s;
+}
+@keyframes rcScan {
+  to {
+    left: 100%;
+  }
+}
+.rc-cues {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.rc-cues li {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  gap: 14px;
+  align-items: baseline;
+}
+.rc-cues code {
+  font: 400 12px/1 var(--font-code);
+  color: var(--dim);
+}
+.rc-cues span {
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+
+/* deliver */
+.rc-map {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 160 / 60;
+  overflow: visible;
+}
+.rc-grid {
+  fill: rgba(255, 255, 255, 0.13);
+}
+.rc-arc {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 0.45;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: rcDraw 1s var(--ease) forwards var(--d);
+}
+@keyframes rcDraw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.rc-city circle {
+  fill: var(--text);
+}
+.rc-city .rc-ping {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 0.35;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: rcPing 1.8s ease-out infinite var(--d);
+}
+@keyframes rcPing {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(3.2);
+    opacity: 0;
+  }
+}
+.rc-city text {
+  font: 500 3.2px var(--font-body);
+  fill: var(--muted);
+}
+.rc-devices {
+  margin-top: 6px;
+}
+.rc-devices {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+.rc-devices span {
+  padding: 6px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* watch */
+.rc-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.rc-stats small {
+  display: block;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+.rc-stats b {
+  display: block;
+  margin-top: 6px;
+  font-size: clamp(24px, 3vw, 34px);
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+/* the line is wiped in from the left (the SVG is stretched, so a dash-offset draw would distort) */
+.rc-spark {
+  display: block;
+  width: 100%;
+  height: 56px;
+  margin-top: 14px;
+  animation: rcWipe 1.4s var(--ease) both var(--d);
+}
+.rc-spark polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+@keyframes rcWipe {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+.rc-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.rc-lock svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.rc-link code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font: 400 12.5px/1.2 var(--font-code);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.rc-link small {
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.rc-end {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+/* the chapter bar */
+.reel-bar {
+  position: absolute;
+  z-index: 3;
+  left: 46px;
+  right: 22px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  animation: rcIn 0.5s var(--ease) both 0.3s;
+}
+.reel-chapters {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+.reel-chapters button {
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: 500 11.5px/1 var(--font-body);
+  color: var(--dim);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.reel-chapters button:hover,
+.reel-chapters button:focus-visible,
+.reel-chapters .is-now {
+  color: var(--text);
+  outline: none;
+}
+.reel-chapters i {
+  display: block;
+  height: 2px;
+  margin-bottom: 8px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+.reel-chapters em {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--text);
+}
+.reel-chapters .is-done em {
+  width: 100%;
+}
+.reel-chapters .is-now em {
+  background: var(--accent);
+  animation: rcBar var(--ms) linear forwards;
+}
+@keyframes rcBar {
+  to {
+    width: 100%;
+  }
+}
+.reel-meta {
+  font: 400 11.5px/1 var(--font-code);
+  color: var(--dim);
+  white-space: nowrap;
+}
+.reel-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: rgb(var(--bg-rgb) / 0.6);
+  color: var(--muted);
+  cursor: pointer;
+}
+.reel-close:hover {
+  color: var(--text);
+}
+.reel-close svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+@media (max-width: 700px) {
+  .viewfinder.is-playing {
+    height: 470px;
+  }
+  .reel-play {
+    width: 70%;
+  }
+  .reel-stage {
+    inset: 48px 18px 70px;
+  }
+  .reel-kicker {
+    margin-bottom: 12px;
+  }
+  .rc-parts {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+  .rc-parts i {
+    height: 24px;
+  }
+  .rc-ladder {
+    grid-template-columns: 44px repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .rc-cues li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .rc-cues span {
+    font-size: 15px;
+  }
+  .rc-note {
+    font-size: 12.5px;
+  }
+  .rc-stats {
+    gap: 10px;
+  }
+  .rc-stats small {
+    font-size: 11px;
+  }
+  .rc-link small {
+    display: none;
+  }
+  .reel-bar {
+    left: 18px;
+    right: 14px;
+    gap: 10px;
+  }
+  .reel-chapters span {
+    font-size: 10.5px;
+  }
+  .rc-city text {
+    font-size: 5.4px;
+  }
 }

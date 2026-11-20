@@ -7,10 +7,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
     <div className="auth">
       <div className="auth-main">
         <Link href="/" className="brand auth-brand" aria-label="MediaEX home">
-          <Logo />
-          <span>
-            Media<b>EX</b>
-          </span>
+          <Logo size={22} />
         </Link>
         <main className="auth-form-wrap">{children}</main>
         <footer className="auth-foot">

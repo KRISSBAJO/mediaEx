@@ -1,11 +1,10 @@
-import HeroScene from '@/components/HeroScene'
+import HeroReel from '@/components/HeroReel'
 import WaveTerrain from '@/components/WaveTerrain'
 import Nav from '@/components/Nav'
 import MotionRoot from '@/components/MotionRoot'
 import PriceDial from '@/components/PriceDial'
 import Closing from '@/components/Closing'
 import Footer from '@/components/Footer'
-import Timecode from '@/components/Timecode'
 import Pipeline from '@/components/Pipeline'
 import DevConsole from '@/components/DevConsole'
 
@@ -62,24 +61,7 @@ export default function Home() {
       <main id="top">
         {/* ---------------- HERO ---------------- */}
         <section className="hero" aria-label="Introduction">
-          <div className="viewfinder">
-            <HeroScene mode="frame" />
-            <span className="vf-corner tl" aria-hidden="true" />
-            <span className="vf-corner tr" aria-hidden="true" />
-            <span className="vf-corner bl" aria-hidden="true" />
-            <span className="vf-corner br" aria-hidden="true" />
-            <div className="vf-meta top" aria-hidden="true">
-              <span className="vf-live">
-                <i />
-                Live
-              </span>
-              <Timecode />
-            </div>
-            <div className="vf-meta bottom" aria-hidden="true">
-              <span>4K · 24 fps · HDR</span>
-              <span className="hide-sm">Edge · Lagos → Paris → New York</span>
-            </div>
-          </div>
+          <HeroReel />
           <div className="hero-copy">
             <h1 className="hero-title hero-anim" style={d(250)}>
               Upload once.
@@ -95,8 +77,8 @@ export default function Home() {
                 <a href="/sign-up" className="btn btn-primary btn-lg">
                   Start free <Arrow />
                 </a>
-                <a href="#engine" className="link-arrow">
-                  Watch the film <Arrow />
+                <a href="#tour" className="link-arrow" data-play-tour>
+                  Watch the tour <Arrow />
                 </a>
               </div>
             </div>

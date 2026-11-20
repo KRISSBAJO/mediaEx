@@ -135,10 +135,7 @@ export default function Nav() {
     <header ref={headerRef} className={cls}>
       <div className="nav-inner">
         <a href={home ? '#top' : '/'} className="brand" aria-label="MediaEX home" onClick={() => setOpen(false)}>
-          <Logo size={26} />
-          <span>
-            Media<b>EX</b>
-          </span>
+          <Logo size={22} />
         </a>
 
         <nav ref={linksRef} className="nav-links" aria-label="Main">
