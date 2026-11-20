@@ -1,6 +1,17 @@
 /** Media types shared by the API and the dashboard (re-exported for the frontend by lib/media/types.ts). Keep this file free of imports. */
 
 export type MediaType = 'video' | 'audio' | 'image'
+
+export type UploadPolicy = {
+  kinds: MediaType[]
+  maxBytes: number | null
+  review: boolean
+  playback: 'signed' | 'public'
+  maxShortSide: number | null
+  maxSourceEdge: number | null
+  maxDuration: number | null
+}
+export type UploadPreset = { id: string; name: string; folderId: string | null; isDefault: boolean; policy: UploadPolicy }
 export type MediaStatus = 'uploading' | 'queued' | 'processing' | 'ready' | 'failed'
 
 /** Pipeline stages, in order. `asset.stage` is an index into this list. */
@@ -124,6 +135,28 @@ export type TagCount = { tag: string; count: number }
 export type StatusFilter = 'ready' | 'active' | 'failed'
 export type DateFilter = '1d' | '7d' | '30d' | '365d'
 export type Sort = 'relevance' | 'new' | 'old' | 'name' | 'size' | 'long'
+export type WorkspaceAssetSummary = {
+  total: number
+  unfiled: number
+  committedBytes: number
+  uploaded: number
+  active: number
+  failed: number
+  pending: number
+  bytes: number
+  video: number
+  audio: number
+  image: number
+}
+
+export type AssetPage = {
+  assets: MediaAsset[]
+  total: number
+  bytes: number
+  previous: string | null
+  next: string | null
+}
+
 export type SearchQuery = {
   q?: string
   folder?: string // a folder id, or "root" for assets in no folder; absent = everywhere

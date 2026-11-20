@@ -13,8 +13,12 @@
  *   DELETE /api/v1/assets/:id/captions/:lang                                                        full
  *   POST   /api/v1/assets/:id/playback-token    { expiresIn? } → { token, expiresAt, embedUrl, playbackUrl }   read
  *   DELETE /api/v1/assets/:id                                                                       full
+ *   GET    /api/v1/assets/trash                    recoverable assets                              full
+ *   POST   /api/v1/assets/:id/restore              restore a trashed asset                         full
+ *   GET    /api/v1/assets/:id/revisions            versions and recovery events                     full
+ *   POST   /api/v1/assets/:id/revisions            expectedCurrent and replacementId or restoreRevisionId   full
  *   POST   /api/v1/assets/:id/retry             run the pipeline again                              full
- *   POST   /api/v1/uploads                      { fileName, size, mimeType?, folderId?, multipart? } → { asset, upload }   upload
+ *   POST   /api/v1/uploads                      { fileName, size, mimeType?, folderId?, presetId?, multipart? } → { asset, upload }   upload
  *   PUT    /api/v1/uploads/:id                  the file (only when upload.url points here)         upload
  *   POST   /api/v1/uploads/:id/parts            { numbers } → where to PUT each part (multipart)    upload
  *   GET    /api/v1/uploads/:id/parts            parts that have arrived, to resume (multipart)      upload
@@ -27,11 +31,14 @@
  * 429 comes with Retry-After. Keys are rate limited per key (API_RATE_LIMIT_PER_MINUTE, default 120).
  */
 import { baseURL, pool } from '../auth.mts'
-import { HttpError, apiAsset, handle, searchAssets } from './assets.mts'
+import { HttpError, apiAsset, handle } from './assets.mts'
+import { searchAssets } from './asset-search.mts'
+import { recovery } from './recovery.mts'
 import { keyActor, requireScope } from './keys.mts'
 import { captions, completeUpload, one, playbackToken, receivePart, receiveUpload, retry, startUpload, uploadParts } from './routes.mts'
 import { KEY_SCOPE_LABEL, parseQuery } from './types.mts'
 import { analyticsFor } from './analytics.mts'
+import { listPresets } from './presets.mts'
 
 /** Where API callers reach us: the public app origin, which forwards /api/v1 to this service. */
 export const apiBase = () => (process.env.PUBLIC_API_URL ?? baseURL).replace(/\/$/, '')
@@ -44,6 +51,11 @@ export function handleV1(req: Request, parts: string[]) {
     const [, , area, raw, sub, extra] = parts // api, v1, area, id?, sub?, part number or caption language?
     const m = req.method
     if (parts.length > ((area === 'uploads' && sub === 'parts') || (area === 'assets' && sub === 'captions') ? 6 : 5)) throw new HttpError(404, 'Not found')
+    if (area === 'uploads' && raw === 'presets' && parts.length === 4 && m === 'GET') {
+      requireScope(a, 'read')
+      return Response.json(await listPresets(a.orgId), { headers: noStore })
+    }
+    if (area === 'assets' && raw === 'trash' && parts.length === 4) return recovery(a, req, undefined, 'trash')
     let id: string | undefined
     try {
       id = raw === undefined ? undefined : decodeURIComponent(raw)
@@ -69,6 +81,7 @@ export function handleV1(req: Request, parts: string[]) {
         const more = rows.length > limit
         return Response.json({ assets: rows.slice(0, limit).map(apiAsset), limit, offset, nextOffset: more ? offset + limit : null }, { headers: noStore })
       }
+      if (id && sub && ['restore','revisions'].includes(sub) && parts.length === 5) return recovery(a, req, id, sub)
       if (id && !sub) {
         requireScope(a, m === 'GET' || m === 'HEAD' ? 'read' : 'full')
         return one(a, req, id)
@@ -104,7 +117,7 @@ export function handleV1(req: Request, parts: string[]) {
     if (area === 'folders' && !id && m === 'GET') {
       requireScope(a, 'read')
       const { rows } = await pool.query<{ id: string; name: string; parentId: string | null; assetCount: number; createdAt: Date }>(
-        `select f.id, f.name, f."parentId", f."createdAt", (select count(*)::int from "asset" a where a."folderId" = f.id) as "assetCount"
+        `select f.id, f.name, f."parentId", f."createdAt", (select count(*)::int from "asset" a where a."folderId" = f.id and a."deletedAt" is null) as "assetCount"
            from "folder" f where f."organizationId" = $1 order by lower(f.name)`,
         [a.orgId],
       )

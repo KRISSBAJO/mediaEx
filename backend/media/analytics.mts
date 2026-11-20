@@ -158,7 +158,7 @@ export async function report(orgId: string, range: AnalyticsRange, asset: string
     pool.query<{ id: string; title: string; type: string; views: number; watch: number; completed: number }>(
       `select a.id, a.title, a.type, count(*)::int as views, sum("watchSeconds")::float as watch,
               count(*) filter (where v."maxPosition" >= greatest(a.duration, 1) * 0.9)::int as completed
-         ${base} group by a.id, a.title, a.type order by views desc limit 10`,
+         ${base} and a."deletedAt" is null group by a.id, a.title, a.type order by views desc limit 10`,
       args,
     ),
     pool.query<{ country: string | null; views: number; startup: number | null; rebuffer: number; watch: number; errors: number }>(
@@ -224,7 +224,7 @@ export async function analyticsFor(orgId: string, req: Request) {
   const asset = sp.get('asset')
   if (asset !== null && !/^ast_[a-z0-9]{6,20}$/.test(asset)) throw new HttpError(400, 'asset must be an asset ID.')
   if (asset) {
-    const { rows } = await pool.query('select 1 from "asset" where id = $1 and "organizationId" = $2', [asset, orgId])
+    const { rows } = await pool.query('select 1 from "asset" where id = $1 and "organizationId" = $2 and "deletedAt" is null', [asset, orgId])
     if (!rows[0]) throw new HttpError(404, 'That asset doesn’t exist in this workspace.')
   }
   return Response.json(await report(orgId, rangeOf(sp.get('range')), asset), { headers: { 'Cache-Control': 'no-store' } })
