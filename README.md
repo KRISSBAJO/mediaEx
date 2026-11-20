@@ -75,7 +75,16 @@ it before inviting real users.
 Container filesystems are wiped on every redeploy, so in production the backend **refuses uploads** (HTTP 503 with an
 explanation) until a bucket or a mounted `MEDIA_DIR` is configured; everything else keeps working. Browsers upload
 straight to the bucket with presigned URLs, so the bucket needs a CORS rule allowing `PUT` from the frontend origin.
-The backend logs which storage it uses at startup.
+### Private object storage pilot
+
+MediaEX records the store for each asset in Postgres. The database also holds workspace ownership, library metadata, review decisions and playback policy. Originals, renditions, captions and transformations use the store assigned to the asset.
+
+1. On an existing volume deployment keep the mount and set `MEDIAEX_LEGACY_STORAGE=local`. On an existing bucket deployment set it to `s3`. Migrate the database with the previous store available. The first bucket configuration binds the database to that bucket endpoint and name.
+2. Set `MEDIAEX_S3_WORKSPACE_IDS` to the comma-separated IDs of participating workspaces. An explicitly empty value sends all **new** uploads to disk. An unset value preserves the previous single-store deployment. Changing the list does not move existing objects. Keep both stores available while their assets exist.
+3. Configure the bucket credentials only on the backend. `S3_SESSION_TOKEN` is supported for temporary credentials. Use private objects and allow the exact dashboard origin to read and upload media. The bucket CORS policy must permit GET, HEAD and PUT, the upload request headers including Content-Type and If-None-Match, and expose ETag for multipart uploads. Verify a browser upload, a completed encode and a signed playback link through expiry before onboarding another workspace.
+4. To inventory old volume assets run `node --experimental-strip-types backend/migrate-media-storage.mts --workspace ID` from the repository root (omit `backend/` when executing inside the backend image directory). Select a single asset with `--asset ID`. Forward migration covers eligible, ready disk assets without historical revisions. The operator first drains media writers, including transformations, then supplies `--apply --writers-stopped`. The command verifies object checksums before changing the asset record and keeps the local recovery copy. For rollback, use the same asset and flags plus `--rollback`; both inventories must still match the receipt.
+
+**Recovery and reporting.** Workspace owners and admins manage upload policies in Settings → Upload presets. Trash offers a 30-day restore window. A restore needs the stored media objects and their database records. Back up Postgres alongside media files and verify that the pair can be restored. The Usage and errors page shows measured media usage. Transfer reported by players is a partial measurement. `MEDIA_CLEAN_EXPIRED_UPLOADS=on` enables background disposal of expired upload reservations and expired Trash. Leave it unset to inspect the release before enabling disposal. Previously issued object URLs can be used until their expiry.
 
 ## How auth works
 
@@ -86,6 +95,8 @@ The backend logs which storage it uses at startup.
 - `proxy.ts` — fast redirect to `/sign-in` for `/dashboard/*` when there's no session cookie.
 - `backend/account.mts` — validates the session and loads the user’s workspaces and membership role for the dashboard. Better Auth enforces workspace permissions on the backend.
 - `backend/migrate.mts` — creates or updates the tables (`npm run db:migrate`).
+
+Site administrators must verify the email on their MediaEX account. To bootstrap the first administrator, set `SITE_ADMIN_EMAILS` on the backend and complete the verification link for that address or sign in through a configured identity provider that confirms email ownership. Production verification emails require a working `RESEND_API_KEY` and sender. Existing verified accounts on the list are recognized during migration. Existing site admins can promote another verified account from **Site Admin → Administrators**.
 
 ## How media works
 
@@ -218,10 +229,13 @@ Send `Authorization: Bearer mx_live_…` to the frontend origin, which forwards 
 | `PATCH /api/v1/assets/:id` | full | `{ title?, tags?, folderId?, metadata? }` |
 | `DELETE /api/v1/assets/:id` | full | Deletes the asset and its files |
 | `POST /api/v1/assets/:id/retry` | full | Runs the pipeline again |
-| `POST /api/v1/uploads` | upload | `{ fileName, size, mimeType?, folderId? }` returns the asset and where to `PUT` the file |
+| `GET /api/v1/uploads/presets` | read | List the workspace's named upload presets and their IDs |
+| `POST /api/v1/uploads` | upload | `{ fileName, size, mimeType?, folderId?, presetId?, multipart? }` returns the asset and where to `PUT` the file |
 | `PUT /api/v1/uploads/:id` | upload | The file itself, when `upload.url` points here (local-disk storage); with a bucket it's a presigned URL instead |
 | `POST /api/v1/uploads/:id/complete` | upload | Checks the file arrived and queues it for processing |
 | `GET /api/v1/folders` | read | The workspace's folders with asset counts |
+
+Owners and admins manage upload presets in **Settings → Upload presets**. Choose a preset in **Uploads** or pass its ID as `presetId`. Omitting the ID applies the workspace default, if configured. Each upload retains the policy it started with. A preset controls allowed media types, original size and dimensions, duration, the video rendition ceiling, destination folder, signed playback and whether review is required. Input checks run again on the stored media before publication. When uploading to a bucket, send the returned `upload.headers` and the exact announced body length. Browser uploads set Content-Length automatically.
 
 Responses use the dashboard's asset shape, with absolute thumbnail, poster and playback URLs. Uploads made with a key
 show "API key: <name>" as their uploader. Errors are `{ "error": "…" }` with a matching status. The router is
