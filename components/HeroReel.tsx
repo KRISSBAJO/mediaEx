@@ -14,7 +14,7 @@ const CHAPTERS = [
   { key: 'upload', name: 'Upload', meta: 'Resumable · 16 MiB parts' },
   { key: 'encode', name: 'Encode', meta: 'H.264 · HEVC · AV1' },
   { key: 'captions', name: 'Captions', meta: 'Speech to WebVTT' },
-  { key: 'deliver', name: 'Deliver', meta: 'Edge · Lagos → Paris → New York' },
+  { key: 'deliver', name: 'Deliver', meta: 'One URL · every screen' },
   { key: 'watch', name: 'Watch', meta: 'Signed links · live analytics' },
 ] as const
 const CHAPTER_MS = 4000
@@ -134,10 +134,11 @@ function Captions() {
 
 // placed by longitude and latitude on a 160 × 60 strip of the world (130°W–60°E, 65°N–20°S)
 const geo = (lon: number, lat: number) => ({ x: ((lon + 130) / 190) * 160, y: ((65 - lat) / 85) * 60 })
+// the worked example's viewers, with the startup times the player reported for them
 const CITIES = [
-  { name: 'Lagos', ...geo(3.4, 6.5), ms: 38 },
-  { name: 'Paris', ...geo(2.35, 48.9), ms: 41 },
-  { name: 'New York', ...geo(-74, 40.7), ms: 44 },
+  { name: 'Lagos', ...geo(3.4, 6.5), ms: 640 },
+  { name: 'Paris', ...geo(2.35, 48.9), ms: 410 },
+  { name: 'New York', ...geo(-74, 40.7), ms: 520 },
 ]
 function Deliver() {
   return (
@@ -167,7 +168,7 @@ function Deliver() {
         ))}
       </div>
       <p className="rc-note" style={d(2.6)}>
-        <span className="rc-dot is-good" /> One playback URL. The first frame lands in <Count to={38} ms={1200} delay={2600} /> ms.
+        <span className="rc-dot is-good" /> One playback URL for every screen, and the player reports how fast each viewer started.
       </p>
     </div>
   )
@@ -191,9 +192,9 @@ function Watch({ onReplay }: { onReplay: () => void }) {
           </b>
         </div>
         <div style={d(0.4)}>
-          <small>Time to first frame</small>
+          <small>Avg. time to first frame</small>
           <b>
-            <Count to={38} ms={1400} delay={500} /> ms
+            <Count to={520} ms={1400} delay={500} /> ms
           </b>
         </div>
       </div>
@@ -356,8 +357,8 @@ export default function HeroReel() {
       )}
 
       <div className={`vf-meta bottom ${playing ? 'is-hidden' : ''}`} aria-hidden="true">
-        <span>4K · 24 fps · HDR</span>
-        <span className="hide-sm">Edge · Lagos → Paris → New York</span>
+        <span>4K · 24 fps · AV1</span>
+        <span className="hide-sm">HLS · Lagos → Paris → New York</span>
       </div>
 
       {playing && (

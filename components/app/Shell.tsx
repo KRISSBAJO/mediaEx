@@ -145,7 +145,7 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
           <span className="side-label">Resources</span>
           <Link href="/#developers" onClick={onNavigate}>
             <Icon name="book" />
-            Docs
+            API overview
             <Icon name="external" size={13} className="side-ext" />
           </Link>
         </div>

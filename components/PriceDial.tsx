@@ -100,7 +100,7 @@ export default function PriceDial() {
     setT(clamp((x - r.left) / r.width))
   }
 
-  const label = `${formatSize(gb)}: ${plan.name}, ${plan.monthly === 0 ? 'free' : `$${yearly ? plan.yearly : plan.monthly} a month`}${over ? ' plus storage over 10 TB' : ''}`
+  const label = `${formatSize(gb)}: ${plan.name}, ${plan.monthly === 0 ? 'free' : `$${yearly ? plan.yearly : plan.monthly} a month`}${over ? ', 10 TB included with no hard cap' : ''}`
 
   return (
     <div className="pd" style={{ ['--t' as string]: t }}>
@@ -128,10 +128,9 @@ export default function PriceDial() {
           <div className="pd-amt">
             <span className="pd-cur">$</span>
             <span className="pd-num">{price}</span>
-            {over && <span className="pd-plus">+ usage</span>}
           </div>
           <span className="pd-per">
-            {plan.monthly === 0 ? 'Free forever, no card needed' : over ? 'a month, plus storage over 10 TB' : yearly ? 'a month, billed yearly' : 'a month, billed monthly'}
+            {plan.monthly === 0 ? 'Free forever, no card needed' : over ? 'a month · 10 TB included, no hard cap' : yearly ? 'a month, billed yearly' : 'a month, billed monthly'}
           </span>
         </div>
       </div>

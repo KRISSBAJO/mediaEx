@@ -17,45 +17,40 @@ const d = (ms: number) => ({ ['--d' as string]: `${ms}ms` })
 type Cell = boolean | string
 const COMPARE: { group: string; rows: [string, Cell, Cell, Cell][] }[] = [
   {
-    group: 'Storage and delivery',
+    group: 'Storage and uploads',
     rows: [
-      ['Storage', '100 GB', '2 TB', '10 TB, then usage'],
-      ['Global delivery', true, true, true],
-      ['Dedicated edge capacity', false, false, true],
+      ['Storage (originals and everything made from them)', '100 GB', '2 TB', '10 TB, no hard cap'],
+      ['Processing minutes a month', '50', '1,000', 'Unlimited'],
+      ['Uploads up to 50 GB, resumable', true, true, true],
     ],
   },
   {
     group: 'Encoding and playback',
     rows: [
-      ['Streaming quality', '1080p', '4K HDR', '8K, Dolby Vision'],
-      ['Dolby Atmos audio', false, false, true],
-      ['Transcode minutes', '50 / mo', '1,000 / mo', 'Unlimited'],
-      ['Embeddable player', true, true, true],
-      ['Custom player branding', false, true, true],
+      ['Top streaming resolution', '1080p', '4K', '8K'],
+      ['H.264 adaptive streaming (HLS)', true, true, true],
+      ['HEVC and AV1 encoding', false, true, true],
+      ['Embeddable player and share links', true, true, true],
+      ['Signed playback links', true, true, true],
+      ['Global delivery, no bandwidth fees', true, true, true],
     ],
   },
   {
-    group: 'AI and collaboration',
+    group: 'Captions and library',
     rows: [
-      ['Auto captions', 'English', '40+ languages', '40+ languages'],
-      ['Review links', false, true, true],
-      ['Version history', false, true, true],
+      ['Automatic captions (spoken language detected)', true, true, true],
+      ['Upload your own captions (VTT, SRT)', true, true, true],
+      ['Folders, collections, tags, custom fields', true, true, true],
+      ['Moderation and review queue', true, true, true],
     ],
   },
   {
-    group: 'Developers',
+    group: 'Developers and insight',
     rows: [
-      ['REST API and API keys', true, true, true],
+      ['REST API with scoped keys', true, true, true],
       ['Signed webhooks', true, true, true],
       ['URL image transforms', true, true, true],
-    ],
-  },
-  {
-    group: 'Security and support',
-    rows: [
-      ['DRM', false, false, true],
-      ['SSO and audit logs', false, false, true],
-      ['Support', 'Community', 'Community', '24/7 priority'],
+      ['View analytics', true, true, true],
     ],
   },
 ]
@@ -63,24 +58,28 @@ const COMPARE: { group: string; rows: [string, Cell, Cell, Cell][] }[] = [
 const FAQ: [string, string][] = [
   [
     'What counts towards storage?',
-    'The originals you upload. The renditions we make for streaming, the thumbnails and the captions are on us and never count against your plan.',
+    'The originals you upload and everything the pipeline makes from them: the streaming renditions, thumbnails, posters and captions. Settings → Billing shows where you are.',
   ],
   [
     'Do you charge for bandwidth?',
-    'Global delivery is part of every plan, so viewers watching your videos doesn’t add a line to your bill. That is what we mean by no egress surprises.',
+    'No. Delivery is part of every plan, so people watching your videos never adds to your bill. That is what we mean by no egress surprises.',
   ],
   [
-    'What happens when I outgrow my plan?',
-    'Nothing breaks. We let you know as you get close, and you can move up a plan in a click. On Studio, storage past 10 TB is billed as you go.',
+    'What happens when I reach a limit?',
+    'Everything you already have keeps streaming. On Creator and Pro, new uploads pause when storage is full or the month’s processing minutes are used, until you upgrade, free up space or the month resets. Studio has unlimited minutes and no hard storage cap.',
   ],
   [
-    'Can I switch plans or cancel?',
-    'Any time, from Settings. Moving up takes effect straight away; moving down or cancelling takes effect at the end of the period you’ve paid for.',
+    'What are processing minutes?',
+    'The length of each video and audio file the pipeline processes in a billing period. A 10-minute video uses 10 minutes, whichever codecs it’s encoded in. Images don’t count.',
   ],
-  ['How does yearly billing work?', 'You pay for twelve months up front and save about 20% on Pro and Studio, compared with paying monthly.'],
+  [
+    'How do I upgrade or cancel?',
+    'From Settings → Billing in your dashboard. Cancelling keeps your plan until the end of the period you’ve paid for, then the workspace moves to Creator.',
+  ],
+  ['How does yearly billing work?', 'You pay for twelve months up front: $228 instead of $288 for Pro, and $948 instead of $1,188 for Studio.'],
   [
     'Is the free plan really free?',
-    'Yes. Creator has no time limit and needs no card. It includes the player, the API and delivery, the same as the paid plans.',
+    'Yes. Creator has no time limit and needs no card. It includes the player, the API, webhooks, captions and analytics, the same as the paid plans.',
   ],
 ]
 

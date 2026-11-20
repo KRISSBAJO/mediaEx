@@ -19,7 +19,7 @@ const STEPS = [
     key: 'encode',
     label: 'Encode',
     title: 'A streaming ladder, built for you',
-    body: 'FFmpeg cuts an adaptive HLS ladder from 1080p down to 360p, with a poster, thumbnails and audio waveforms.',
+    body: 'FFmpeg cuts an adaptive HLS ladder up to your plan’s top resolution, in H.264 and optionally HEVC and AV1, with a poster, thumbnails and waveforms.',
     status: 'Encoding',
   },
   {
