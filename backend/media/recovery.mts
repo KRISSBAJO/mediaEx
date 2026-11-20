@@ -39,7 +39,7 @@ async function transaction<T>(fn: (db: PoolClient) => Promise<T>) {
 }
 
 async function audit(db: PoolClient, a: Actor, id: string, action: string, version: string) {
-  const actor = a.via === 'key' ? 'key:' + (a.keyId ?? a.keyName) : 'user:' + a.userId
+  const actor = a.label ?? (a.via === 'key' ? 'key:' + (a.keyId ?? a.keyName) : 'user:' + a.userId)
   await db.query('insert into asset_recovery_event ("organizationId","assetId",action,actor,"revisionId") values ($1,$2,$3,$4,$5)',
     [a.orgId, id, action, actor, version])
 }

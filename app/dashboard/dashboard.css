@@ -4580,3 +4580,230 @@ b .apill {
     display: none;
   }
 }
+
+/* ------------------------------------------------ settings → retention */
+.retention-empty {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 24px 20px;
+}
+.retention-empty > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--dim);
+}
+.retention-empty b {
+  font-weight: 500;
+}
+.retention-empty p {
+  max-width: 560px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 14.5px;
+}
+.retention-rows {
+  container-type: inline-size;
+}
+.retention-rows li {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 16px 20px;
+}
+@container (min-width: 640px) {
+  .retention-rows li {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+}
+.retention-rows li.is-paused b,
+.retention-rows li.is-paused .retention-desc {
+  color: var(--muted);
+}
+.retention-rows b {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: normal;
+}
+.retention-rows b .status {
+  padding: 1px 7px;
+  font-size: 12.5px;
+}
+.retention-desc {
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.retention-rows small {
+  white-space: normal;
+}
+.retention-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.retention-form fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.retention-form .setting-field {
+  max-width: none;
+}
+.retention-group {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.retention-group h3 {
+  margin: 0 0 14px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.retention-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.retention-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  font-size: 14.5px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.retention-check:has(input:checked) {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+}
+.retention-check svg {
+  color: var(--muted);
+}
+.retention-check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.retention-check.is-plain {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+}
+.retention-check.is-plain:has(input:checked) {
+  background: none;
+  color: var(--text);
+}
+.retention-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 20px;
+  margin-top: 20px;
+}
+.retention-pair .setting-field + .setting-field {
+  margin-top: 0;
+}
+.setting-field > span em {
+  color: var(--dim);
+  font-style: normal;
+  font-weight: 400;
+}
+.retention-days {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+.retention-days .input {
+  width: 96px;
+}
+.retention-days > span {
+  color: var(--muted);
+  font-size: 14.5px;
+}
+.retention-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 6px;
+}
+.retention-quick .btn.is-on {
+  border-color: rgba(255, 255, 255, 0.28);
+  color: var(--text);
+}
+.retention-note {
+  display: block;
+  margin-top: 10px;
+  color: var(--dim);
+  font-size: 13.5px;
+}
+.retention-form small.is-bad {
+  display: block;
+  margin-top: 8px;
+  font-size: 13.5px;
+}
+.retention-preview {
+  display: flex;
+  gap: 12px;
+  margin-top: 28px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--raise);
+}
+.retention-preview > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--good);
+}
+.retention-preview.has-matches {
+  border-color: rgb(245 165 36 / 0.3);
+  background: rgb(245 165 36 / 0.05);
+}
+.retention-preview.has-matches > svg {
+  color: var(--warn);
+}
+.retention-preview b {
+  font-weight: 500;
+}
+.retention-preview p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.retention-preview strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.retention-enable {
+  margin-top: 20px;
+}
+.retention-form .dialog-foot {
+  margin-top: 24px;
+}
+.retention-log li {
+  min-height: 0;
+  padding: 12px 20px;
+}
+.retention-log b span {
+  color: var(--muted);
+  font-weight: 400;
+}
+@media (max-width: 720px) {
+  .retention-pair {
+    grid-template-columns: 1fr;
+  }
+  .retention-quick {
+    margin-left: 0;
+  }
+}

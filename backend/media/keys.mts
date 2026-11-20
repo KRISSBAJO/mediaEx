@@ -27,7 +27,7 @@ function secret() {
 }
 
 /** Who is calling: a signed-in member (dashboard) or an API key (public API). */
-export type Actor = { orgId: string; userId: string | null; role: string; via: 'session' | 'key'; scope: KeyScope; keyName?: string; keyId?: string }
+export type Actor = { orgId: string; userId: string | null; role: string; via: 'session' | 'key'; scope: KeyScope; keyName?: string; keyId?: string; label?: string }
 
 export async function sessionActor(headers: Headers): Promise<Actor> {
   const m = await requireMember(headers)

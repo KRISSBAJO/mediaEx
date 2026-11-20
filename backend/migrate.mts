@@ -10,6 +10,7 @@ import { PERMANENT_CLEANUP_SCHEMA } from './media/permanent-cleanup-schema.mts'
 import { RECOVERY_SCHEMA } from './media/recovery-schema.mts'
 import { PRESET_SCHEMA } from './media/preset-schema.mts'
 import { OPERATIONS_SCHEMA } from './media/operations-schema.mts'
+import { RETENTION_SCHEMA } from './media/retention-schema.mts'
 
 if (!process.env.DATABASE_URL) {
   console.error('[migrate] DATABASE_URL is not set.')
@@ -31,6 +32,7 @@ await pool.query(PERMANENT_CLEANUP_SCHEMA)
 await pool.query(LIBRARY_INDEXES)
 await pool.query(PRESET_SCHEMA)
 await pool.query(OPERATIONS_SCHEMA)
+await pool.query(RETENTION_SCHEMA)
 console.log('[migrate] Media tables are up to date.')
 const promoted = await bootstrapVerifiedAdmins()
 if (promoted) console.log(`[migrate] Promoted ${promoted} verified bootstrap admin account(s).`)
