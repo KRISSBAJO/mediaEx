@@ -10,16 +10,15 @@ import MediaPlayer from '../MediaPlayer'
 import MetadataEditor from '../MetadataEditor'
 import CaptionsPanel from '../CaptionsPanel'
 import TransformBuilder from '../TransformBuilder'
-import { flatTree, useLibrary } from '../library'
+import { flatTree, request, useLibrary } from '../library'
 import { CollectDialog, TagInput } from '../library-ui/dialogs'
 import { Ago, dims, useMedia } from '../media'
 import { Card, ModerationBadge, Segmented, StatusBadge, Tabs, TypeIcon, copyText, toast } from '../ui'
 import { canManage, useAccount } from '../account'
-import { request } from '../library'
+import ShareLink, { createSignedLink, type SignedLink } from '../ShareLink'
 
 type Tab = 'renditions' | 'embed' | 'transform' | 'captions'
 
-type SignedLink = { token: string; expiresAt: string; embedUrl: string; playbackUrl: string | null }
 const LINK_TTL = [
   { value: '3600', label: '1 hour' },
   { value: '86400', label: '24 hours' },
@@ -27,15 +26,23 @@ const LINK_TTL = [
   { value: '2592000', label: '30 days' },
 ] as const
 
+const expiryFormat = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'long', timeZone: 'UTC' })
+
 /** Who can watch: anyone with the link, or only viewers holding a signed, expiring link. */
-function PlaybackAccess({ id, policy, onChange }: { id: string; policy: 'public' | 'signed'; onChange: (p: 'public' | 'signed') => void }) {
+function PlaybackAccess({ id, policy, approved, link, setLink, onChange }: {
+  id: string
+  policy: 'public' | 'signed'
+  approved: boolean
+  link: SignedLink | null
+  setLink: (link: SignedLink | null) => void
+  onChange: (p: 'public' | 'signed') => void
+}) {
   const [ttl, setTtl] = useState<string>('86400')
-  const [link, setLink] = useState<SignedLink | null>(null)
   const [busy, setBusy] = useState(false)
   const create = async () => {
     setBusy(true)
     try {
-      setLink(await request<SignedLink>(`/api/assets/${id}/playback-token`, { method: 'POST', json: { expiresIn: Number(ttl) } }))
+      setLink(await createSignedLink(id, Number(ttl)))
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Couldn’t create the link.')
     } finally {
@@ -59,7 +66,7 @@ function PlaybackAccess({ id, policy, onChange }: { id: string; policy: 'public'
             ? 'The plain share link, stream URL and embed stop working for viewers. Hand out signed links that expire instead; members of this workspace can always watch.'
             : 'Anyone who has the share link, stream URL or embed can watch. Switch to signed links to make every link expire.'}
         </p>
-        {policy === 'signed' && (
+        {policy === 'signed' && approved && (
           <>
             <div className="copy-row">
               <select className="select" value={ttl} onChange={(e) => setTtl(e.target.value)} aria-label="Link lifetime">
@@ -75,14 +82,8 @@ function PlaybackAccess({ id, policy, onChange }: { id: string; policy: 'public'
             </div>
             {link && (
               <>
-                <div className="copy-row">
-                  <code>{link.embedUrl}</code>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(link.embedUrl, 'Signed link copied')}>
-                    <Icon name="copy" size={15} /> Copy
-                  </button>
-                </div>
                 <p className="access-note">
-                  Expires <Ago iso={link.expiresAt} />. For your own player, use the stream URL with the same token. To sign links on your own server, see Developers → Playback signing.
+                  Expires <time dateTime={link.expiresAt}>{expiryFormat.format(new Date(link.expiresAt))}</time>. For your own player, use the stream URL with the same token. To sign links on your own server, see Developers → Playback signing.
                 </p>
               </>
             )}
@@ -107,6 +108,8 @@ export default function AssetDetail({ id }: { id: string }) {
   const [renaming, setRenaming] = useState(false)
   const [title, setTitle] = useState('')
   const [origin, setOrigin] = useState('')
+  const [issued, setIssued] = useState<{ id: string; link: SignedLink } | null>(null)
+  const [opening, setOpening] = useState(false)
   useEffect(() => setOrigin(window.location.origin), [])
 
   if (!a) {
@@ -121,21 +124,24 @@ export default function AssetDetail({ id }: { id: string }) {
     )
   }
 
-  const watch = `${origin}/embed/${a.id}`
-  const stream = a.playbackUrl ? `${origin}${a.playbackUrl}` : ''
+  const signed = a.playback === 'signed'
+  const signedLink = issued?.id === id && Date.parse(issued.link.expiresAt) > Date.now() ? issued.link : null
+  const watch = signed ? signedLink?.embedUrl : origin && `${origin}/embed/${a.id}`
+  const playlist = signed ? signedLink?.playbackUrl : a.playbackUrl
+  const stream = playlist && origin ? new URL(playlist, origin).href : ''
   const embed = `<iframe src="${watch}" width="100%" style="aspect-ratio:16/9;border:0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`
   const ready = a.status === 'ready'
   // share links only work once the asset is approved (moderation)
   const shareable = ready && a.moderation === 'approved'
-  const signed = a.playback === 'signed'
-  // signed assets get a fresh 24-hour link instead of the plain one
-  const copyShare = async () => {
-    if (!signed) return copyText(watch, 'Share link copied — anyone with it can watch')
+  const openSignedPlayer = async () => {
+    setOpening(true)
     try {
-      const l = await request<SignedLink>(`/api/assets/${a.id}/playback-token`, { method: 'POST', json: { expiresIn: 86400 } })
-      await copyText(l.embedUrl, 'Signed link copied — it works for 24 hours')
+      const link = await createSignedLink(id)
+      window.location.assign(link.embedUrl)
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Couldn’t create the link.')
+    } finally {
+      setOpening(false)
     }
   }
 
@@ -161,16 +167,16 @@ export default function AssetDetail({ id }: { id: string }) {
           </div>
         </div>
         <div className="page-actions">
-          {shareable && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => void copyShare()}>
-              <Icon name="link" size={15} /> {signed ? 'Copy 24-hour link' : 'Copy share link'}
+          <ShareLink asset={a} />
+          {shareable && (signed ? (
+            <button type="button" className="btn btn-primary btn-sm" disabled={opening} onClick={openSignedPlayer}>
+              {opening ? 'Opening player…' : 'Open player'} <Icon name="play" size={14} />
             </button>
-          )}
-          {shareable && (
+          ) : (
             <a href={`/embed/${a.id}`} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">
               Open player <Icon name="external" size={14} />
             </a>
-          )}
+          ))}
           <div className="menu-wrap">
             <button type="button" className="icon-btn" aria-label="More actions" aria-haspopup="menu" aria-expanded={more} onClick={() => setMore((m) => !m)}>
               <Icon name="more" />
@@ -317,36 +323,49 @@ export default function AssetDetail({ id }: { id: string }) {
 
               {tab === 'embed' && (
                 <div className="stack">
-                  <PlaybackAccess id={a.id} policy={a.playback} onChange={(playback) => void update(a.id, { playback })} />
-                  <Card title="Share link" meta={signed ? 'Members only — viewers need a signed link' : 'Anyone with the link can watch'}>
-                    <div className="copy-row">
-                      <code>{watch}</code>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(watch, 'Share link copied')}>
-                        <Icon name="copy" size={15} /> Copy
-                      </button>
-                    </div>
-                  </Card>
-                  <Card title="HLS stream" meta="For your own player">
-                    <div className="copy-row">
-                      <code>{stream}</code>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(stream, 'Stream URL copied')}>
-                        <Icon name="copy" size={15} /> Copy
-                      </button>
-                    </div>
-                  </Card>
-                  <Card
-                    title="Embed code"
-                    meta="Responsive iframe"
-                    action={
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(embed, 'Embed code copied')}>
-                        <Icon name="copy" size={15} /> Copy
-                      </button>
-                    }
-                  >
-                    <pre className="snippet">
-                      <code>{embed}</code>
-                    </pre>
-                  </Card>
+                  <PlaybackAccess
+                    id={id}
+                    policy={a.playback}
+                    approved={shareable}
+                    link={signedLink}
+                    setLink={(link) => setIssued(link ? { id, link } : null)}
+                    onChange={(playback) => void update(id, { playback })}
+                  />
+                  {shareable && watch && (
+                    <>
+                      <Card title="Share link" meta={signed ? 'Expires with the signed link' : 'Anyone with the link can watch'}>
+                        <div className="copy-row">
+                          <code>{watch}</code>
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(watch, 'Share link copied')}>
+                            <Icon name="copy" size={15} /> Copy
+                          </button>
+                        </div>
+                      </Card>
+                      {stream && (
+                        <Card title="HLS stream" meta="For your own player">
+                          <div className="copy-row">
+                            <code>{stream}</code>
+                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(stream, 'Stream URL copied')}>
+                              <Icon name="copy" size={15} /> Copy
+                            </button>
+                          </div>
+                        </Card>
+                      )}
+                      <Card
+                        title="Embed code"
+                        meta="Responsive iframe"
+                        action={
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(embed, 'Embed code copied')}>
+                            <Icon name="copy" size={15} /> Copy
+                          </button>
+                        }
+                      >
+                        <pre className="snippet">
+                          <code>{embed}</code>
+                        </pre>
+                      </Card>
+                    </>
+                  )}
                 </div>
               )}
             </div>

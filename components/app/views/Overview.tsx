@@ -28,7 +28,7 @@ export default function Overview() {
   const { user } = useAccount()
   const [range, setRange] = useState<Range>('30d')
   const [table, setTable] = useState(false)
-  const { data } = useAnalytics(range)
+  const { data, error } = useAnalytics(range)
   const t = data?.totals
   const c = data?.change
   const daily = data?.daily ?? []
@@ -53,6 +53,12 @@ export default function Overview() {
       <p className="section-note">
         <span className="overline">Audience</span> Views through share links and embeds
       </p>
+      {error && (
+        <div className="banner is-bad" role="alert">
+          <Icon name="alert" />
+          <div>{error}</div>
+        </div>
+      )}
       <div className="grid-ruled stat-tiles">
         <StatTile label="Views" value={t ? compact(t.views) : '—'} delta={c?.views ?? undefined} points={daily.map((d) => ({ label: d.date, value: d.views }))} period={PERIOD[range]} />
         <StatTile label="Watch time" value={t ? (t.watchHours >= 100 ? compact(Math.round(t.watchHours)) : t.watchHours.toFixed(1)) : '—'} unit="hrs" delta={c?.watchHours ?? undefined} points={daily.map((d) => ({ label: d.date, value: d.watchHours }))} period={PERIOD[range]} />
@@ -214,9 +220,9 @@ export default function Overview() {
           <Card title="Top countries" meta={`Views · last ${PERIOD[range]}`}>
             {data?.countries.length ? (
               <BarList points={data.countries.slice(0, 5).map((r) => ({ label: countryName(r.country), value: r.views }))} format={compact} />
-            ) : (
+            ) : data ? (
               <p className="quiet-note">No views yet. Share a link or embed a player to see where your audience is.</p>
-            )}
+            ) : <p className="quiet-note">{error ? 'Country data unavailable.' : 'Loading country data…'}</p>}
           </Card>
         </div>
       </div>

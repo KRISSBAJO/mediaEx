@@ -14,29 +14,36 @@ const PERIOD: Record<AnalyticsRange, string> = { '7d': '7 days', '30d': '30 days
 
 /** The report for a range (and optionally one asset), refetched when either changes. */
 export function useAnalytics(range: AnalyticsRange, asset = '') {
-  const [data, setData] = useState<AnalyticsReport | null>(null)
-  const [error, setError] = useState('')
+  const params = new URLSearchParams({ range })
+  if (asset) params.set('asset', asset)
+  const url = `/api/analytics?${params}`
+  const [result, setResult] = useState<{ url: string; data: AnalyticsReport | null; error: string } | null>(null)
   useEffect(() => {
-    let live = true
-    setError('')
-    fetch(`/api/analytics?range=${range}${asset ? `&asset=${asset}` : ''}`, { cache: 'no-store' })
+    const controller = new AbortController()
+    fetch(url, { cache: 'no-store', signal: controller.signal })
       .then(async (r) => {
-        const body = await r.json().catch(() => ({}))
-        if (!r.ok) throw new Error(body.error ?? `Couldn’t load analytics (${r.status})`)
-        if (live) setData(body)
+        if (!r.ok) {
+          const body = await r.json().catch(() => null)
+          throw new Error(body?.error || `Couldn't load analytics (${r.status}).`)
+        }
+        const data: AnalyticsReport = await r.json()
+        if (!controller.signal.aborted) setResult({ url, data, error: '' })
       })
-      .catch((e: Error) => live && setError(e.message))
-    return () => {
-      live = false
-    }
-  }, [range, asset])
-  return { data, error }
+      .catch((e: Error) => {
+        if (!controller.signal.aborted) setResult({ url, data: null, error: e.message })
+      })
+    return () => controller.abort()
+  }, [url])
+  return result?.url === url ? result : { data: null, error: '' }
 }
 
 const day = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 const regions = typeof Intl !== 'undefined' && 'DisplayNames' in Intl ? new Intl.DisplayNames(['en'], { type: 'region' }) : null
 export const countryName = (c: string | null) => (c ? (regions?.of(c) ?? c) : 'Unknown')
-export const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
+export function mmss(seconds: number) {
+  const rounded = Math.round(seconds)
+  return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, '0')}`
+}
 const pct = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`
 export const watchTime = (h: number) => (h >= 1 ? `${h.toFixed(1)} h` : h * 60 >= 1 ? `${Math.round(h * 60)} min` : `${Math.round(h * 3600)} s`)
 
@@ -95,7 +102,8 @@ export default function Analytics() {
         <StatTile label="Rebuffer ratio" value={t ? (t.rebufferRatio * 100).toFixed(2) : '—'} unit="%" delta={c?.rebufferRatio ?? undefined} upIsGood={false} period={PERIOD[range]} />
       </div>
 
-      {empty ? (
+      {!data && !error && <p className="quiet-note" role="status">Loading analytics…</p>}
+      {data && (empty ? (
         <Card>
           <div className="empty">
             <Icon name="analytics" size={22} />
@@ -220,7 +228,7 @@ export default function Analytics() {
             </div>
           </Card>
         </div>
-      )}
+      ))}
     </>
   )
 }
