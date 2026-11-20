@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { isActive, parseQuery, queryParams, type MediaAsset, type SearchQuery } from '@/lib/media/types'
+import { isActive, parseQuery, queryParams, type AssetPage, type SearchQuery } from '@/lib/media/types'
 import { bytes, duration as fmtDuration } from '@/lib/sample'
 import Icon from '../Icon'
 import { request, useLibrary } from '../library'
@@ -60,7 +60,13 @@ export default function Library() {
   )
 
   /* ------------------------------------------------ results, from the server, kept fresh by the polled asset list */
-  const [result, setResult] = useState<{ query: string; assets: MediaAsset[] | null; error: string } | null>(null)
+  const goToPage = (direction: 'after' | 'before', cursor: string) => {
+    const next = queryParams(query)
+    next.set(direction, cursor)
+    router.push(`${pathname}?${next}`, { scroll: false })
+  }
+  const hasCursor = params.has('after') || params.has('before')
+  const [result, setResult] = useState<{ query: string; page: AssetPage | null; error: string } | null>(null)
   const [loading, setLoading] = useState(false)
   const pending = useRef<AbortController | null>(null)
   const search = useCallback(async () => {
@@ -69,12 +75,14 @@ export default function Library() {
     pending.current = controller
     setLoading(true)
     try {
-      const { assets } = await request<{ assets: MediaAsset[] }>(`/api/assets?${paramString}`, { signal: controller.signal })
-      if (!controller.signal.aborted) setResult({ query: paramString, assets, error: '' })
+      const searchParams = new URLSearchParams(paramString)
+      searchParams.set('view', 'page')
+      const page = await request<AssetPage>(`/api/assets?${searchParams}`, { signal: controller.signal })
+      if (!controller.signal.aborted) setResult({ query: paramString, page, error: '' })
     } catch (e) {
       if (!controller.signal.aborted) {
         const error = e instanceof Error ? e.message : 'Please try again.'
-        setResult(previous => ({ query: paramString, assets: previous?.query === paramString ? previous.assets : null, error }))
+        setResult(previous => ({ query: paramString, page: previous?.query === paramString ? previous.page : null, error }))
       }
     } finally {
       if (pending.current === controller) {
@@ -92,7 +100,8 @@ export default function Library() {
     return () => clearTimeout(timer)
   }, [search, media.assets])
   const current = result?.query === paramString ? result : null
-  const found = current?.assets ?? null
+  const page = current?.page
+  const found = page?.assets ?? null
   const searchError = current?.error
   // the polled list has the freshest status for anything still processing
   const list = useMemo(() => (found ?? []).map((a) => media.get(a.id) ?? a), [found, media])
@@ -109,9 +118,10 @@ export default function Library() {
     const visible = new Set(list.map((a) => a.id))
     setSelected((s) => (([...s].every((x) => visible.has(x)) ? s : new Set([...s].filter((x) => visible.has(x))))))
   }, [list])
+  const previewed = list.find(asset => asset.id === preview)
   useEffect(() => {
-    if (preview && !media.get(preview)) setPreview(null)
-  }, [preview, media])
+    if (found && preview && !previewed) setPreview(null)
+  }, [found, preview, previewed])
   useEffect(() => {
     setSelected(new Set())
     setAnchor(null)
@@ -184,8 +194,7 @@ export default function Library() {
   const path = folder ? lib.folderPath(folder.id) : []
   const title = collection?.name ?? folder?.name ?? (query.folder === 'root' ? 'Not in a folder' : 'Library')
   const filtered = Boolean(query.q || query.type?.length || query.status?.length || query.tags?.length || query.date || Object.keys(query.meta ?? {}).length)
-  const stored = list.reduce((t, a) => t + a.size + a.outputSize, 0)
-  const sub = found === null ? 'Loading…' : `${n(list.length)}${filtered ? ' match' + (list.length === 1 ? 'es' : '') : ''} · ${bytes(stored)}${collection?.description ? ` · ${collection.description}` : ''}`
+  const sub = !page ? 'Loading…' : `${page.total.toLocaleString()} ${filtered ? (page.total === 1 ? 'match' : 'matches') : (page.total === 1 ? 'asset' : 'assets')} · ${bytes(page.bytes)}${collection?.description ? ` · ${collection.description}` : ''}`
 
   return (
     <>
@@ -241,7 +250,7 @@ export default function Library() {
                 <b>{ids.length} selected</b>
                 {ids.length < list.length && (
                   <button type="button" className="btn btn-quiet btn-sm" onClick={() => setSelected(new Set(list.map((a) => a.id)))}>
-                    Select all {list.length}
+                    Select {list.length} on this page
                   </button>
                 )}
                 <span className="grow" />
@@ -277,7 +286,7 @@ export default function Library() {
               </>
             ) : (
               <>
-                <span className="lib-count">{loading && found !== null ? 'Searching…' : found === null ? '' : `Showing ${n(list.length)}`}</span>
+                <span className="lib-count">{loading && found !== null ? 'Searching…' : !page ? '' : `Showing ${list.length} of ${n(page.total)}`}</span>
                 <span className="grow" />
                 <span className="lib-hint">Click to preview · ⇧ / ⌘ click or tick to select · drag onto a folder</span>
                 <div className="seg seg-icon" role="group" aria-label="Layout">
@@ -292,7 +301,9 @@ export default function Library() {
             )}
           </div>
 
-          {found !== null && list.length === 0 ? (
+          {hasCursor && found !== null && !list.length ? (
+            <div className="empty"><p>This page no longer has any assets.</p></div>
+          ) : found !== null && list.length === 0 ? (
             <Card>
               <div className="empty">
                 <Icon name={filtered ? 'search' : collection ? 'layers' : 'library'} size={22} />
@@ -381,7 +392,7 @@ export default function Library() {
                       <th className="check-col">
                         <input
                           type="checkbox"
-                          aria-label="Select all"
+                          aria-label="Select all assets on this page"
                           checked={selecting && selected.size === list.length}
                           ref={(el) => {
                             if (el) el.indeterminate = selecting && selected.size < list.length
@@ -431,9 +442,16 @@ export default function Library() {
               </div>
             </Card>
           )}
+          {(page?.previous || page?.next || hasCursor) && (
+            <nav className="lib-bar" aria-label="Library pages">
+              {(searchError || !list.length) && hasCursor && <button type="button" className="btn btn-ghost btn-sm" onClick={() => go(query)}>First page</button>}
+              <button type="button" className="btn btn-ghost btn-sm" disabled={!page?.previous} onClick={() => page?.previous && goToPage('before', page.previous)}>Previous</button>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={!page?.next} onClick={() => page?.next && goToPage('after', page.next)}>Next</button>
+            </nav>
+          )}
         </section>
 
-        {preview && <Preview id={preview} onClose={() => setPreview(null)} />}
+        {previewed && <Preview asset={previewed} onClose={() => setPreview(null)} />}
       </div>
 
       {dialog === 'move' && (
@@ -468,12 +486,12 @@ export default function Library() {
       )}
       {dialog === 'delete' && (
         <ConfirmDialog
-          title={`Delete ${n(ids.length)}?`}
-          sub="Their originals and every rendition are removed from storage, and share links stop working. This can’t be undone."
-          action={`Delete ${n(ids.length)}`}
+          title={`Move ${n(ids.length)} to Trash?`}
+          sub="Workspace owners and admins can restore completed uploads from Trash for 30 days. Incomplete uploads are canceled."
+          action="Move to Trash"
           danger
           onClose={() => setDialog(null)}
-          onConfirm={async () => (await lib.bulk(ids, { action: 'delete' })) && done(`Deleted ${n(ids.length)}`)}
+          onConfirm={async () => (await lib.bulk(ids, { action: 'delete' })) && done(`Moved ${n(ids.length)} to Trash`)}
         />
       )}
       {dialog === 'save' && (

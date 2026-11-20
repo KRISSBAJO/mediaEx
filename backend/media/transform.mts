@@ -13,7 +13,8 @@ import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import { pool } from '../auth.mts'
 import { HttpError, getAssetRow, prefixOf, type AssetRow } from './assets.mts'
-import { contentType, storage } from './storage.mts'
+import { isPublic } from './moderation.mts'
+import { contentType, storage, type DeliveryAccess } from './storage.mts'
 
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg'
 const MAX_SIDE = 4096
@@ -140,7 +141,7 @@ function ffmpegFrame(input: string, at: number): Promise<Buffer> {
 }
 
 async function sourceImage(a: AssetRow, t?: number): Promise<Buffer> {
-  const store = storage()
+  const store = storage(a)
   if (a.type === 'image') {
     const b = await store.getBuffer(a.originalKey)
     if (!b) throw new HttpError(404, 'The original is missing.')
@@ -244,9 +245,7 @@ async function slot<T>(fn: () => Promise<T>): Promise<T> {
  * `preview=1` (members only) renders without storing anything, so the dashboard's builder can show every tweak
  * without filling the asset's variant allowance.
  */
-export async function transform(req: Request, id: string, canView: (a: AssetRow) => Promise<boolean>, isMember: (a: AssetRow) => Promise<boolean>) {
-  const a = await getAssetRow(id)
-  if (!a || !(await canView(a))) return new Response('Not found', { status: 404 })
+export async function transform(req: Request, a: AssetRow, access: DeliveryAccess, isMember: () => Promise<boolean>) {
   if (a.status !== 'ready') throw new HttpError(409, 'This asset is still processing.')
 
   const url = new URL(req.url)
@@ -254,7 +253,7 @@ export async function transform(req: Request, id: string, canView: (a: AssetRow)
   const preview = params.get('preview') === '1'
   params.delete('preview')
   params.delete('token') // a signed-playback token (checked by canView), not part of the transformation
-  if (preview && !(await isMember(a))) throw new HttpError(403, 'Previews are for members of the workspace.')
+  if (preview && !(await isMember())) throw new HttpError(403, 'Previews are for members of the workspace.')
   const hasAlpha = a.type === 'image' && /\.(png|webp|avif|gif|tiff?)$/i.test(a.originalKey)
   const t = parseTransform(params, req.headers.get('accept'), hasAlpha)
   if (t.t !== undefined && a.type !== 'video') throw new HttpError(400, 't only applies to video.')
@@ -264,20 +263,25 @@ export async function transform(req: Request, id: string, canView: (a: AssetRow)
   if (t.wm) {
     wm = await getAssetRow(t.wm, a.organizationId)
     if (!wm || wm.type !== 'image' || wm.status !== 'ready') throw new HttpError(400, 'wm must be a ready image in the same workspace.')
+    if (wm.playback === 'signed' || !isPublic(wm)) {
+      if (!(await isMember())) return new Response(null, { status: 404, headers: { 'Cache-Control': 'private, no-store' } })
+      access = 'member'
+    }
   }
 
   if (preview) {
-    const [src, mark] = await slot(() => Promise.all([sourceImage(a, t.t), wm ? storage().getBuffer(wm.originalKey) : Promise.resolve(null)]))
+    const [src, mark] = await slot(() => Promise.all([sourceImage(a, t.t), wm ? storage(wm).getBuffer(wm.originalKey) : Promise.resolve(null)]))
     const out = await slot(() => render(src, t, mark))
     return new Response(new Uint8Array(out), {
       headers: { 'Content-Type': contentType(`x.${t.f}`), 'Content-Length': String(out.length), 'Cache-Control': 'private, no-store', 'X-MediaEX-Cache': 'PREVIEW' },
     })
   }
 
-  const version = `${new Date(a.readyAt ?? a.createdAt).getTime()}${wm ? `:${new Date(wm.readyAt ?? wm.createdAt).getTime()}` : ''}`
+  const physicalWatermark = wm && prefixOf(wm) !== wm.organizationId + '/' + wm.id ? ':' + wm.originalKey : ''
+  const version = `${new Date(a.readyAt ?? a.createdAt).getTime()}${wm ? `:${new Date(wm.readyAt ?? wm.createdAt).getTime()}${physicalWatermark}` : ''}`
   const hash = createHash('sha256').update(`${canonical(t)}|${version}`).digest('hex').slice(0, 24)
   const key = `${prefixOf(a)}/derived/${hash}.${t.f === 'jpeg' ? 'jpg' : t.f}`
-  const store = storage()
+  const store = storage(a)
 
   let cache = 'HIT'
   if ((await store.size(key)) === null) {
@@ -287,13 +291,33 @@ export async function transform(req: Request, id: string, canView: (a: AssetRow)
     let job = inflight.get(key)
     if (!job) {
       job = slot(async () => {
-        const [src, mark] = await Promise.all([sourceImage(a, t.t), wm ? storage().getBuffer(wm.originalKey) : Promise.resolve(null)])
+        const [src, mark] = await Promise.all([sourceImage(a, t.t), wm ? storage(wm).getBuffer(wm.originalKey) : Promise.resolve(null)])
         const out = await render(src, t, mark)
-        await store.putBuffer(key, out, contentType(key))
-        await pool.query(
-          `insert into "asset_variant" ("assetId", key, params, format, bytes) values ($1, $2, $3, $4, $5) on conflict ("assetId", key) do nothing`,
-          [a.id, key, canonical(t), t.f, out.length],
-        )
+        const inputs = wm && wm.id !== a.id ? [a, wm] : [a]
+        const db = await pool.connect()
+        try {
+          await db.query('begin')
+          const { rows: current } = await db.query<AssetRow>(`select id,"originalKey","readyAt","storageBackend",playback,moderation,"takenDown"
+            from asset where id=any($1) and "deletedAt" is null and status='ready' order by id for share`, [inputs.map(row => row.id)])
+          for (const input of inputs) {
+            const latest = current.find(row => row.id === input.id)
+            if (!latest || latest.originalKey !== input.originalKey || latest.storageBackend !== input.storageBackend ||
+                latest.playback !== input.playback || latest.moderation !== input.moderation || latest.takenDown !== input.takenDown ||
+                new Date(latest.readyAt ?? 0).getTime() !== new Date(input.readyAt ?? 0).getTime())
+              throw new HttpError(409, 'The image changed while rendering. Retry the request.')
+          }
+          await store.putBuffer(key, out, contentType(key))
+          await db.query(
+            `insert into "asset_variant" ("assetId", key, params, format, bytes) values ($1, $2, $3, $4, $5) on conflict ("assetId", key) do nothing`,
+            [a.id, key, canonical(t), t.f, out.length],
+          )
+          await db.query('commit')
+        } catch (error) {
+          await db.query('rollback')
+          throw error
+        } finally {
+          db.release()
+        }
         return out
       }).finally(() => inflight.delete(key))
       inflight.set(key, job)
@@ -301,8 +325,10 @@ export async function transform(req: Request, id: string, canView: (a: AssetRow)
     await job
   }
 
-  const res = await store.serve(key, req)
-  res.headers.set('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800')
+  const res = await store.serve(key, req, { access })
+  // Access and moderation policies can change at this same URL; retain the rendered
+  // derivative in storage and recheck access on the next client request.
+  res.headers.set('Cache-Control', access === 'public' ? 'private, no-cache' : 'private, no-store')
   res.headers.set('Access-Control-Allow-Origin', '*')
   res.headers.set('X-MediaEX-Cache', cache)
   if (params.get('f') === 'auto' || !params.get('f')) res.headers.set('Vary', 'Accept')

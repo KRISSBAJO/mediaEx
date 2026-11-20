@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Logo from '@/components/Logo'
 import { authClient, authMessage } from '@/lib/auth-client'
-import { isActive as inPipeline, type MediaAsset } from '@/lib/media/types'
+import type { AssetPage, MediaAsset, WorkspaceAssetSummary } from '@/lib/media/types'
 import { bytes } from '@/lib/sample'
 import { AccountProvider, useAccount, type Account } from './account'
 import { LibraryProvider, useLibrary } from './library'
@@ -21,8 +21,10 @@ const NAV = [
       { href: '/dashboard', label: 'Overview', icon: 'overview' },
       { href: '/dashboard/library', label: 'Library', icon: 'library' },
       { href: '/dashboard/uploads', label: 'Uploads', icon: 'upload' },
+      { href: '/dashboard/trash', label: 'Trash', icon: 'trash' },
       { href: '/dashboard/review', label: 'Review', icon: 'check' },
       { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics' },
+      { href: '/dashboard/usage', label: 'Usage and errors', icon: 'layers' },
     ],
   },
   {
@@ -81,13 +83,13 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
   }
   const wsRef = useOutside(ws, () => setWs(false))
   const meRef = useOutside(me, () => setMe(false))
-  const { assets } = useMedia()
+  const { summary } = useMedia()
   const counts: Record<string, number> = {
-    '/dashboard/library': assets.filter((a) => a.status !== 'uploading').length,
-    '/dashboard/uploads': assets.filter(inPipeline).length,
-    '/dashboard/review': assets.filter((a) => a.moderation === 'pending').length,
+    '/dashboard/library': summary.uploaded,
+    '/dashboard/uploads': summary.active,
+    '/dashboard/review': summary.pending,
   }
-  const used = assets.reduce((t, a) => t + a.size + a.outputSize, 0)
+  const used = summary.committedBytes
 
   return (
     <div className="side-inner">
@@ -209,6 +211,22 @@ function CommandMenu({ open, onClose }: { open: boolean; onClose: () => void }) 
   const inputRef = useRef<HTMLInputElement>(null)
   const { assets } = useMedia()
   const { folders, collections, folderPath } = useLibrary()
+  const [matches, setMatches] = useState<{ query: string; assets: MediaAsset[] } | null>(null)
+  const term = q.trim()
+  useEffect(() => {
+    if (!open || !term) return
+    const controller = new AbortController()
+    const timer = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ view: 'page', q: term })
+        const response = await fetch(`/api/assets?${params}`, { signal: controller.signal, cache: 'no-store' })
+        if (!response.ok) return
+        const { assets } = await response.json() as AssetPage
+        if (!controller.signal.aborted) setMatches({ query: term, assets })
+      } catch { /* the full Library search also exposes retry */ }
+    }, 180)
+    return () => { clearTimeout(timer); controller.abort() }
+  }, [term, open])
 
   const cmds = useMemo<Cmd[]>(() => {
     const go = (href: string) => () => router.push(href)
@@ -232,9 +250,16 @@ function CommandMenu({ open, onClose }: { open: boolean; onClose: () => void }) 
 
   const list = useMemo(() => {
     const s = q.trim().toLowerCase()
-    const hits = s ? cmds.filter((c) => c.label.toLowerCase().includes(s)) : cmds.filter((c) => c.group === 'Pages' || c.group === 'Actions').concat(cmds.filter((c) => c.group === 'Assets').slice(0, 4))
-    return hits.slice(0, 16)
-  }, [q, cmds])
+    if (!s) return cmds.filter(c => c.group === 'Pages' || c.group === 'Actions').concat(cmds.filter(c => c.group === 'Assets').slice(0, 4)).slice(0, 16)
+    const navigation = cmds.filter(c => c.group !== 'Assets' && c.label.toLowerCase().includes(s))
+    const assets = matches?.query === term ? matches.assets.map(a => ({
+      id: a.id, group: 'Assets', label: a.title, icon: a.type, hint: a.status, run: () => router.push(`/dashboard/library/${a.id}`),
+    })) : cmds.filter(c => c.group === 'Assets' && c.label.toLowerCase().includes(s))
+    return [...navigation, ...assets].slice(0, 15).concat({
+      id: 'library-search', group: 'Library', label: `Search library for "${term}"`, icon: 'search',
+      run: () => router.push(`/dashboard/library?${new URLSearchParams({ q: term })}`),
+    })
+  }, [q, term, matches, router, cmds])
 
   useEffect(() => {
     if (open) {
@@ -333,11 +358,11 @@ function crumbs(path: string, workspaceName: string, assets: MediaAsset[]) {
   return out
 }
 
-export default function Shell({ account, initialAssets, children }: { account: Account; initialAssets: MediaAsset[]; children: React.ReactNode }) {
+export default function Shell({ account, initialAssets, initialSummary, children }: { account: Account; initialAssets: MediaAsset[]; initialSummary: WorkspaceAssetSummary; children: React.ReactNode }) {
   return (
     <AccountProvider value={account}>
       {/* keyed by workspace so switching workspaces starts from that workspace's media */}
-      <MediaProvider key={account.workspace.id} initial={initialAssets}>
+      <MediaProvider key={account.workspace.id} initial={initialAssets} initialSummary={initialSummary}>
         <LibraryProvider>
           <ShellInner>{children}</ShellInner>
         </LibraryProvider>
@@ -348,8 +373,8 @@ export default function Shell({ account, initialAssets, children }: { account: A
 
 function ShellInner({ children }: { children: React.ReactNode }) {
   const account = useAccount()
-  const { assets } = useMedia()
-  const failed = assets.filter((a) => a.status === 'failed').length
+  const { assets, summary } = useMedia()
+  const failed = summary.failed
   const path = usePathname()
   const [drawer, setDrawer] = useState(false)
   const [cmd, setCmd] = useState(false)

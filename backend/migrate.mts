@@ -3,8 +3,13 @@
  * then the media tables (asset). Runs at backend startup and on demand with `npm run db:migrate`. Safe to repeat.
  */
 import { getMigrations } from 'better-auth/db/migration'
-import { auth, pool } from './auth.mts'
-import { MEDIA_SCHEMA } from './media/schema.mts'
+import { auth, bootstrapVerifiedAdmins, pool } from './auth.mts'
+import { MEDIA_SCHEMA, LIBRARY_INDEXES } from './media/schema.mts'
+import { migrateStorage } from './media/storage-schema.mts'
+import { PERMANENT_CLEANUP_SCHEMA } from './media/permanent-cleanup-schema.mts'
+import { RECOVERY_SCHEMA } from './media/recovery-schema.mts'
+import { PRESET_SCHEMA } from './media/preset-schema.mts'
+import { OPERATIONS_SCHEMA } from './media/operations-schema.mts'
 
 if (!process.env.DATABASE_URL) {
   console.error('[migrate] DATABASE_URL is not set.')
@@ -20,11 +25,13 @@ if (!toBeCreated.length && !toBeAdded.length) {
   console.log('[migrate] Done.')
 }
 await pool.query(MEDIA_SCHEMA)
+await migrateStorage(pool)
+await pool.query(RECOVERY_SCHEMA)
+await pool.query(PERMANENT_CLEANUP_SCHEMA)
+await pool.query(LIBRARY_INDEXES)
+await pool.query(PRESET_SCHEMA)
+await pool.query(OPERATIONS_SCHEMA)
 console.log('[migrate] Media tables are up to date.')
-// SITE_ADMIN_EMAILS are always admins (others are managed from the admin dashboard)
-const admins = (process.env.SITE_ADMIN_EMAILS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
-if (admins.length) {
-  const { rowCount } = await pool.query(`update "user" set role = 'admin' where lower(email) = any($1::text[]) and coalesce(role, '') <> 'admin'`, [admins])
-  console.log(`[migrate] Site admins from SITE_ADMIN_EMAILS: ${admins.length} listed${rowCount ? `, ${rowCount} promoted` : ''}.`)
-}
+const promoted = await bootstrapVerifiedAdmins()
+if (promoted) console.log(`[migrate] Promoted ${promoted} verified bootstrap admin account(s).`)
 await pool.end()

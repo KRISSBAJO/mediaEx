@@ -33,11 +33,11 @@ export default function Overview() {
   const c = data?.change
   const daily = data?.daily ?? []
   const day = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
-  const { assets } = useMedia()
+  const { assets, summary } = useMedia()
   const queue = assets.filter(isActive).slice(0, 5)
   const recent = assets.slice(0, 6)
-  const byType = (['video', 'audio', 'image'] as const).map((t) => ({ label: t === 'video' ? 'Video' : t === 'audio' ? 'Audio' : 'Images', value: assets.filter((a) => a.type === t).length }))
-  const stored = assets.reduce((t, a) => t + a.size + a.outputSize, 0)
+  const byType = (['video', 'audio', 'image'] as const).map((t) => ({ label: t === 'video' ? 'Video' : t === 'audio' ? 'Audio' : 'Images', value: summary[t] }))
+  const stored = summary.bytes
   const [greet, setGreet] = useState('Welcome back')
   useEffect(() => {
     const h = new Date().getHours()
@@ -70,7 +70,7 @@ export default function Overview() {
         <div className="stack">
           <Card
             title="Recent uploads"
-            meta={`${assets.length} in library`}
+            meta={`${summary.total} in library`}
             flush
             action={
               <Link href="/dashboard/library" className="panel-link">
@@ -193,7 +193,7 @@ export default function Overview() {
           </Card>
 
           <Card title="Library" meta={`${bytes(stored)} stored`}>
-            <BarList points={byType} format={(v) => String(v)} max={Math.max(1, assets.length)} />
+            <BarList points={byType} format={(v) => String(v)} max={Math.max(1, summary.total)} />
           </Card>
 
           <Card title="Activity">

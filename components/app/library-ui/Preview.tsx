@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
+import type { MediaAsset } from '@/lib/media/types'
 import { bytes, duration as fmtDuration } from '@/lib/sample'
 import Icon from '../Icon'
 import MediaPlayer from '../MediaPlayer'
@@ -12,12 +13,10 @@ import { ModerationBadge, StatusBadge } from '../ui'
 import ShareLink from '../ShareLink'
 import { CollectDialog, TagInput } from './dialogs'
 
-export default function Preview({ id, onClose }: { id: string; onClose: () => void }) {
+export default function Preview({ asset: a, onClose }: { asset: MediaAsset; onClose: () => void }) {
   const media = useMedia()
   const lib = useLibrary()
-  const a = media.get(id)
   const [collecting, setCollecting] = useState(false)
-  if (!a) return null
   const inCollections = lib.collections.filter((c) => a.collectionIds.includes(c.id))
 
   return (

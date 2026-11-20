@@ -14,7 +14,7 @@ export function createSignedLink(id: string, expiresIn = 86400) {
 
 export default function ShareLink({ asset }: { asset: MediaAsset }) {
   const [busy, setBusy] = useState(false)
-  if (asset.status !== 'ready' || asset.moderation !== 'approved') return null
+  if (asset.status !== 'ready' || asset.moderation !== 'approved' || asset.takenDown) return null
   const signed = asset.playback === 'signed'
 
   async function copy() {

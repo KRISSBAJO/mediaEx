@@ -543,6 +543,8 @@ export default function Developers() {
   }, [inFlight, refresh])
   useEffect(() => {
     if (params.get('new') === '1' && manage) setCreatingKey(true)
+    const delivery = params.get('delivery')
+    if (manage && delivery && /^dlv_[a-z0-9]{1,16}$/.test(delivery)) setViewing(delivery)
   }, [params, manage])
 
   const reveal = (s: Revealed) => {

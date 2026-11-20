@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { auth, personalWorkspaceName, pool } from './auth.mts'
+import { auth, isVerifiedAdmin, personalWorkspaceName, pool } from './auth.mts'
 import { PLANS, planOf } from './media/billing.mts'
 
 type Workspace = { id: string; name: string; slug: string; createdAt: Date; role: string }
@@ -61,7 +61,7 @@ export async function getAccount(headers: Headers) {
     user: {
       id: user.id, name: user.name, email: user.email, emailVerified: user.emailVerified, initials,
       // never an admin while someone is impersonating them
-      isAdmin: !by && ((user as { role?: string | null }).role ?? '').split(',').includes('admin'),
+      isAdmin: isVerifiedAdmin(user, { impersonatedBy: by }),
     },
     impersonation: impersonator ? { by: impersonator.name, byEmail: impersonator.email, expiresAt: new Date(session.expiresAt).toISOString() } : null,
     workspace: {

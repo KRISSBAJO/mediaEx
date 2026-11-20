@@ -71,8 +71,8 @@ export default function AdminUser({ id }: { id: string }) {
             Send password reset
           </button>
           {!u.emailVerified && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => run('verify-email', {}, 'Email marked as verified')}>
-              Mark email verified
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => run('verify-email', {}, 'Verification email requested')}>
+              Send verification email
             </button>
           )}
           {isAdmin ? (
@@ -80,7 +80,7 @@ export default function AdminUser({ id }: { id: string }) {
               Remove admin
             </button>
           ) : (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDialog('admin')}>
+            <button type="button" className="btn btn-ghost btn-sm" disabled={!u.emailVerified} title={u.emailVerified ? undefined : 'This account must verify its email first.'} onClick={() => setDialog('admin')}>
               Make admin
             </button>
           )}

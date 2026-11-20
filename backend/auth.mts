@@ -6,6 +6,7 @@
 import { appendFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { betterAuth } from 'better-auth'
 import { admin, organization } from 'better-auth/plugins'
 import pg from 'pg'
@@ -73,12 +74,27 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET)
 export const enabledSocial = { google: 'google' in socialProviders, github: 'github' in socialProviders }
 
 /* ------------------------------------------------ site admins */
-/** The bootstrap admins: everyone in SITE_ADMIN_EMAILS is an admin (more can be added from the admin dashboard). */
+/** Configured email addresses are eligible for bootstrap once ownership is verified. */
 export const siteAdminEmails = () =>
   (process.env.SITE_ADMIN_EMAILS ?? '')
     .split(',')
     .map((e) => e.trim().toLowerCase())
     .filter((e) => /^[^\s@]+@[^\s@]+$/.test(e))
+
+export async function bootstrapVerifiedAdmins(userId?: string) {
+  const emails = siteAdminEmails()
+  if (!emails.length) return 0
+  const { rowCount } = await pool.query(
+    `update "user" set role='admin', "updatedAt"=now()
+     where "emailVerified" is true and lower(email)=any($1::text[]) and ($2::text is null or id=$2)
+       and not ('admin'=any(string_to_array(coalesce(role,''), ',')))`, [emails, userId ?? null],
+  )
+  return rowCount ?? 0
+}
+
+export function isVerifiedAdmin(user: {emailVerified: boolean; role?: string | null}, session: {impersonatedBy?: string | null}) {
+  return user.emailVerified === true && !session.impersonatedBy && (user.role ?? '').split(',').includes('admin')
+}
 
 /** Writes one line to the admin audit log; never throws (an audit failure mustn't break the action). */
 export async function audit(entry: { adminId: string | null; action: string; targetType: string; targetId: string | null; details?: Record<string, unknown> }) {
@@ -114,6 +130,7 @@ export const auth = betterAuth({
     },
   },
   emailVerification: {
+    afterEmailVerification: async (user) => { await bootstrapVerifiedAdmins(user.id) },
     sendOnSignUp: true,
     autoSignInAfterVerification: true,
     sendVerificationEmail: async ({ user, url }) => {
@@ -130,6 +147,26 @@ export const auth = betterAuth({
     expiresIn: 60 * 60 * 24 * 30, // 30 days
     updateAge: 60 * 60 * 24, // refresh daily
   },
+  hooks: {
+    before: createAuthMiddleware(async ctx => {
+      if (!ctx.path.startsWith('/admin/') || ctx.path === '/admin/stop-impersonating') return
+      const current = await getSessionFromCtx<{role?: string | null}, {impersonatedBy?: string | null}>(ctx, { disableCookieCache: true })
+      if (!current) throw APIError.fromStatus('UNAUTHORIZED', { message: 'Sign in to continue.' })
+      if (!isVerifiedAdmin(current.user, current.session)) throw APIError.fromStatus('FORBIDDEN', { message: 'A verified site admin account is required.' })
+      // Keep privilege changes on the audited MediaEX endpoint, which checks the target atomically.
+      const fields = ctx.body?.data ?? {}
+      if (ctx.path === '/admin/set-role' ||
+          (ctx.path === '/admin/create-user' && (ctx.body?.role ?? fields.role ?? 'user') !== 'user') ||
+          (ctx.path === '/admin/update-user' && Object.hasOwn(fields, 'role'))) {
+        throw APIError.fromStatus('FORBIDDEN', { message: 'Manage site admins in the MediaEX administration dashboard.' })
+      }
+      // Only a mailbox challenge or a trusted provider may attest ownership of an email.
+      if ((ctx.path === '/admin/create-user' || ctx.path === '/admin/update-user') &&
+          (Object.hasOwn(fields, 'emailVerified') || (ctx.path === '/admin/update-user' && Object.hasOwn(fields, 'email')))) {
+        throw APIError.fromStatus('FORBIDDEN', { message: 'Use the verified email flow to establish ownership.' })
+      }
+    }),
+  },
   databaseHooks: {
     user: {
       create: {
@@ -141,8 +178,6 @@ export const auth = betterAuth({
             [user.email],
           )
           if (!rows.length) await createPersonalWorkspace(user.id, user.name)
-          // a bootstrap admin who signs up later is an admin straight away
-          if (siteAdminEmails().includes(user.email.toLowerCase())) await pool.query(`update "user" set role = 'admin' where id = $1`, [user.id])
         },
       },
     },
@@ -150,6 +185,8 @@ export const auth = betterAuth({
       create: {
         // open the user's first workspace when they sign in
         before: async (session) => {
+          // This also covers existing accounts whose provider has just verified the email.
+          await bootstrapVerifiedAdmins(session.userId)
           const { rows } = await pool.query<{ organizationId: string }>(
             'select "organizationId" from "member" where "userId" = $1 order by "createdAt" asc limit 1',
             [session.userId],

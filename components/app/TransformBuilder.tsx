@@ -2,14 +2,15 @@
 
 /**
  * Build a transformation URL visually: size, crop, format, quality, effects, watermark. The preview renders through
- * `preview=1` (members only, never cached); the URL you copy is the cached, public one.
+ * Members can preview a transformation before approving it for delivery.
  */
 import { useEffect, useMemo, useState } from 'react'
 import type { MediaAsset } from '@/lib/media/types'
 import { bytes } from '@/lib/sample'
 import Icon from './Icon'
 import { useMedia } from './media'
-import { Card, copyText } from './ui'
+import { Card, copyText, toast } from './ui'
+import { createSignedLink, type SignedLink } from './ShareLink'
 
 type State = {
   w: string
@@ -86,7 +87,15 @@ function toParams(s: State, video: boolean) {
   return p
 }
 
-export default function TransformBuilder({ asset }: { asset: MediaAsset }) {
+function htmlAttribute(value: string) {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+export default function TransformBuilder({ asset, link, onIssue }: {
+  asset: MediaAsset
+  link: SignedLink | null
+  onIssue: (link: SignedLink) => void
+}) {
   const { assets } = useMedia()
   const video = asset.type === 'video'
   const [s, setS] = useState<State>(() => ({ ...START, t: video ? Math.min(3, Math.round(asset.duration * 10) / 100) : 0 }))
@@ -95,9 +104,36 @@ export default function TransformBuilder({ asset }: { asset: MediaAsset }) {
   useEffect(() => setOrigin(window.location.origin), [])
 
   const params = useMemo(() => toParams(s, video), [s, video])
-  const qs = params.toString()
   const base = `/api/media/${asset.id}/transform`
-  const publicUrl = `${origin}${base}${qs ? `?${qs}` : ''}`
+  const [issuing, setIssuing] = useState(false)
+  const [, setClock] = useState(0)
+  useEffect(() => {
+    if (!link) return
+    const ms = Date.parse(link.expiresAt) - Date.now()
+    if (ms <= 0) return
+    const timer = window.setTimeout(() => setClock(x => x + 1), ms + 1)
+    return () => window.clearTimeout(timer)
+  }, [link])
+  const signed = asset.playback === 'signed'
+  const watermark = s.wmKind === 'image' && s.wm ? assets.find(item => item.id === s.wm) : undefined
+  const privateWatermark = Boolean(s.wmKind === 'image' && s.wm && (watermark?.playback !== 'public' || watermark.moderation !== 'approved' || watermark.takenDown))
+  const approved = asset.status === 'ready' && asset.moderation === 'approved' && !asset.takenDown && !privateWatermark
+  const token = signed && link && Date.parse(link.expiresAt) > Date.now() ? new URL(link.embedUrl, origin || 'https://localhost').searchParams.get('token') : null
+  const canCopy = Boolean(origin && approved && (!signed || token))
+  const delivery = new URLSearchParams(params)
+  if (token) delivery.set('token', token)
+  const qs = delivery.toString()
+  const deliveryUrl = `${origin}${base}${qs ? `?${qs}` : ''}`
+  async function issueLink() {
+    setIssuing(true)
+    try {
+      onIssue(await createSignedLink(asset.id))
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not create a signed link.')
+    } finally {
+      setIssuing(false)
+    }
+  }
 
   // preview: debounced, uncached, sized for the panel
   const [shown, setShown] = useState<{ src: string; size: number; type: string; ms: number } | null>(null)
@@ -136,9 +172,9 @@ export default function TransformBuilder({ asset }: { asset: MediaAsset }) {
   }, [base, params])
 
   const images = assets.filter((a) => a.type === 'image' && a.status === 'ready' && a.id !== asset.id)
-  const w2 = s.w ? new URLSearchParams(params) : null
+  const w2 = s.w ? new URLSearchParams(delivery) : null
   if (w2) w2.set('dpr', '2')
-  const snippet = `<img src="${publicUrl}"${w2 ? `\n     srcset="${origin}${base}?${w2} 2x"` : ''}${s.w ? ` width="${s.w}"` : ''}${s.h ? ` height="${s.h}"` : ''}\n     alt="${asset.title.replace(/"/g, '&quot;')}" loading="lazy">`
+  const snippet = `<img src="${htmlAttribute(deliveryUrl)}"${w2 ? `\n     srcset="${htmlAttribute(`${origin}${base}?${w2}`)} 2x"` : ''}${s.w ? ` width="${s.w}"` : ''}${s.h ? ` height="${s.h}"` : ''}\n     alt="${htmlAttribute(asset.title)}" loading="lazy">`
 
   return (
     <div className="tx">
@@ -325,16 +361,25 @@ export default function TransformBuilder({ asset }: { asset: MediaAsset }) {
             )}
           </div>
         </Card>
+        {privateWatermark && <p className="muted">Only workspace members can see this watermark. Choose a public, approved watermark to share the transformation.</p>}
+        {approved && signed && !canCopy && (
+          <Card title="Signed transformation URL">
+            <button type="button" className="btn btn-primary btn-sm" disabled={issuing} onClick={issueLink}>
+              {issuing ? 'Creating…' : 'Create 24-hour link'}
+            </button>
+          </Card>
+        )}
+        {canCopy && <>
         <Card
           title="URL"
-          meta="Public, cached after the first request"
+          meta={signed && link ? `Expires ${new Date(link.expiresAt).toLocaleString()}` : 'Public, cached after the first request'}
           action={
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(publicUrl, 'Transformation URL copied')}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(deliveryUrl, 'Transformation URL copied')}>
               <Icon name="copy" size={14} /> Copy
             </button>
           }
         >
-          <code className="tx-url">{publicUrl}</code>
+          <code className="tx-url">{deliveryUrl}</code>
         </Card>
         <Card
           title="HTML"
@@ -349,6 +394,7 @@ export default function TransformBuilder({ asset }: { asset: MediaAsset }) {
             <code>{snippet}</code>
           </pre>
         </Card>
+        </>}
       </div>
     </div>
   )

@@ -13,6 +13,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  if (!(await load(id))) notFound()
-  return <AssetDetail id={id} />
+  const asset = await load(id)
+  if (!asset) notFound()
+  return <AssetDetail key={id} id={id} initial={asset} />
 }

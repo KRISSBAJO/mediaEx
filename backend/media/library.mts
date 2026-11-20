@@ -19,10 +19,10 @@
  */
 import { randomBytes } from 'node:crypto'
 import { pool } from '../auth.mts'
-import { HttpError, getAssetRow, prefixOf, requireMember } from './assets.mts'
-import { emitAsset } from './webhooks.mts'
+import { HttpError, requireMember } from './assets.mts'
+import { trashAssets } from './recovery.mts'
 import { listFields, validateValue } from './fields.mts'
-import { storage } from './storage.mts'
+import { sessionActor } from './keys.mts'
 import { normaliseTag, parseQuery, queryParams, type Collection, type Folder, type SavedSearch, type SearchQuery } from './types.mts'
 
 const newId = (prefix: string) => `${prefix}_${randomBytes(9).toString('base64url').replace(/[-_]/g, '').slice(0, 12).toLowerCase()}`
@@ -61,7 +61,7 @@ async function unique<T>(fn: () => Promise<T>, message: string): Promise<T> {
 async function listFolders(orgId: string): Promise<Folder[]> {
   const { rows } = await pool.query<{ id: string; name: string; parentId: string | null; createdAt: Date; assetCount: string }>(
     `select f.id, f.name, f."parentId", f."createdAt", count(a.id) as "assetCount"
-       from "folder" f left join "asset" a on a."folderId" = f.id
+       from "folder" f left join "asset" a on a."folderId" = f.id and a."deletedAt" is null
       where f."organizationId" = $1
       group by f.id order by lower(f.name)`,
     [orgId],
@@ -152,10 +152,10 @@ async function folders(req: Request, id?: string) {
 /* ------------------------------------------------ collections */
 async function listCollections(orgId: string): Promise<Collection[]> {
   const { rows } = await pool.query<{ id: string; name: string; description: string | null; updatedAt: Date; assetCount: string; coverId: string | null; coverOrg: string | null; coverThumb: string | null }>(
-    `select c.id, c.name, c.description, c."updatedAt", count(ca."assetId") as "assetCount",
-            (select a.id from "collection_asset" x join "asset" a on a.id = x."assetId" where x."collectionId" = c.id and a."thumbKey" is not null order by x."addedAt" desc limit 1) as "coverId",
-            (select a."thumbKey" from "collection_asset" x join "asset" a on a.id = x."assetId" where x."collectionId" = c.id and a."thumbKey" is not null order by x."addedAt" desc limit 1) as "coverThumb"
-       from "collection" c left join "collection_asset" ca on ca."collectionId" = c.id
+    `select c.id, c.name, c.description, c."updatedAt", count(visible.id) as "assetCount",
+            (select a.id from "collection_asset" x join "asset" a on a.id = x."assetId" where x."collectionId" = c.id and a."deletedAt" is null and a."thumbKey" is not null order by x."addedAt" desc limit 1) as "coverId",
+            (select a."thumbKey" from "collection_asset" x join "asset" a on a.id = x."assetId" where x."collectionId" = c.id and a."deletedAt" is null and a."thumbKey" is not null order by x."addedAt" desc limit 1) as "coverThumb"
+       from "collection" c left join "collection_asset" ca on ca."collectionId" = c.id left join asset visible on visible.id = ca."assetId" and visible."deletedAt" is null
       where c."organizationId" = $1
       group by c.id order by lower(c.name)`,
     [orgId],
@@ -178,7 +178,7 @@ async function assertCollection(orgId: string, id: string) {
 
 /** Only assets of this workspace, so nobody can add someone else's asset to a collection. */
 async function ownIds(orgId: string, ids: string[]) {
-  const { rows } = await pool.query<{ id: string }>('select id from "asset" where "organizationId" = $1 and id = any($2::text[])', [orgId, ids])
+  const { rows } = await pool.query<{ id: string }>('select id from "asset" where "organizationId" = $1 and "deletedAt" is null and id = any($2::text[])', [orgId, ids])
   return rows.map((r) => r.id)
 }
 
@@ -238,7 +238,7 @@ async function tags(req: Request) {
   const { orgId } = await requireMember(req.headers)
   if (req.method !== 'GET') throw new HttpError(405, 'Method not allowed')
   const { rows } = await pool.query<{ tag: string; count: string }>(
-    `select t as tag, count(*) as count from "asset", unnest(tags) t where "organizationId" = $1 group by t order by count(*) desc, t limit 500`,
+    `select t as tag, count(*) as count from "asset", unnest(tags) t where "organizationId" = $1 and "deletedAt" is null group by t order by count(*) desc, t limit 500`,
     [orgId],
   )
   return Response.json({ tags: rows.map((r) => ({ tag: r.tag, count: Number(r.count) })) }, { headers: { 'Cache-Control': 'no-store' } })
@@ -279,7 +279,8 @@ async function searches(req: Request, id?: string) {
 
 /* ------------------------------------------------ bulk actions on assets */
 export async function bulk(req: Request) {
-  const { orgId } = await requireMember(req.headers)
+  const actor = await sessionActor(req.headers)
+  const { orgId } = actor
   if (req.method !== 'POST') throw new HttpError(405, 'Method not allowed')
   const b = await body<{ ids: unknown; action: unknown; folderId: unknown; tags: unknown; field: unknown; value: unknown }>(req)
   const ids = await ownIds(orgId, cleanIds(b.ids))
@@ -287,7 +288,7 @@ export async function bulk(req: Request) {
 
   if (b.action === 'move') {
     const folderId = await assertFolder(orgId, typeof b.folderId === 'string' ? b.folderId : null)
-    await pool.query('update "asset" set "folderId" = $2, "updatedAt" = now() where id = any($1::text[])', [ids, folderId])
+    await pool.query('update "asset" set "folderId" = $2, "updatedAt" = now() where id = any($1::text[]) and "deletedAt" is null', [ids, folderId])
     return Response.json({ changed: ids.length })
   }
   if (b.action === 'tag' || b.action === 'untag') {
@@ -296,11 +297,11 @@ export async function bulk(req: Request) {
     if (b.action === 'tag') {
       // add without duplicates, and keep within the 20-tag limit per asset
       await pool.query(
-        `update "asset" set tags = (select array(select distinct t from unnest(tags || $2::text[]) t limit 20)), "updatedAt" = now() where id = any($1::text[])`,
+        `update "asset" set tags = (select array(select distinct t from unnest(tags || $2::text[]) t limit 20)), "updatedAt" = now() where id = any($1::text[]) and "deletedAt" is null`,
         [ids, tags],
       )
     } else {
-      await pool.query(`update "asset" set tags = (select array(select t from unnest(tags) t where t <> all($2::text[]))), "updatedAt" = now() where id = any($1::text[])`, [ids, tags])
+      await pool.query(`update "asset" set tags = (select array(select t from unnest(tags) t where t <> all($2::text[]))), "updatedAt" = now() where id = any($1::text[]) and "deletedAt" is null`, [ids, tags])
     }
     return Response.json({ changed: ids.length })
   }
@@ -308,17 +309,11 @@ export async function bulk(req: Request) {
     const field = (await listFields(orgId)).find((f) => f.id === b.field)
     if (!field) throw new HttpError(400, 'Unknown metadata field.')
     const value = validateValue(field, b.value)
-    if (value === undefined) await pool.query(`update "asset" set metadata = metadata - $2, "updatedAt" = now() where id = any($1::text[])`, [ids, field.id])
-    else await pool.query(`update "asset" set metadata = jsonb_set(metadata, array[$2], $3::jsonb), "updatedAt" = now() where id = any($1::text[])`, [ids, field.id, JSON.stringify(value)])
+    if (value === undefined) await pool.query(`update "asset" set metadata = metadata - $2, "updatedAt" = now() where id = any($1::text[]) and "deletedAt" is null`, [ids, field.id])
+    else await pool.query(`update "asset" set metadata = jsonb_set(metadata, array[$2], $3::jsonb), "updatedAt" = now() where id = any($1::text[]) and "deletedAt" is null`, [ids, field.id, JSON.stringify(value)])
     return Response.json({ changed: ids.length })
   }
-  if (b.action === 'delete') {
-    for (const r of await Promise.all(ids.map((id) => getAssetRow(id, orgId)))) if (r) await emitAsset(r, 'asset.deleted')
-    const { rows } = await pool.query<{ id: string; organizationId: string }>('delete from "asset" where id = any($1::text[]) returning id, "organizationId"', [ids])
-    const store = storage()
-    for (let i = 0; i < rows.length; i += 5) await Promise.all(rows.slice(i, i + 5).map((r) => store.removePrefix(prefixOf(r))))
-    return Response.json({ changed: rows.length })
-  }
+  if (b.action === 'delete') return Response.json({ changed: await trashAssets(actor, ids) })
   throw new HttpError(400, 'Unknown action.')
 }
 

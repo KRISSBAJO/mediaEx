@@ -70,7 +70,7 @@ function frame(input: string, at: number): Promise<Buffer> {
 
 /** Up to three pictures to look at, as small JPEGs. Audio has none. */
 async function pictures(a: AssetRow): Promise<Buffer[]> {
-  const store = storage()
+  const store = storage(a)
   let raw: Buffer[] = []
   if (a.type === 'image') {
     const b = (a.posterKey && (await store.getBuffer(a.posterKey))) || (await store.getBuffer(a.originalKey))
@@ -147,8 +147,8 @@ export async function reviewAsset(id: string, force = false) {
   if (!a || a.status !== 'ready') return
   if (a.moderatedBy && !force) return
   const s = await getSettings(a.organizationId)
-  if (s.mode === 'off') {
-    await pool.query(`update "asset" set moderation = 'approved', "moderationFlags" = '[]' where id = $1`, [id])
+  if (s.mode === 'off' && !a.uploadPolicy?.review) {
+    await pool.query(`update "asset" set moderation = 'approved', "moderationFlags" = '[]' where id = $1 and "deletedAt" is null`, [id])
     return
   }
   const fields = await listFields(a.organizationId)
@@ -158,9 +158,9 @@ export async function reviewAsset(id: string, force = false) {
     .filter((v) => typeof v === 'string')
     .join(' ')
   const flags = [...blocklistFlags(a, s.blocklist, fieldText), ...(s.aiReview && aiAvailable() ? await aiFlags(a) : [])]
-  const state = s.mode === 'all' || flags.length ? 'pending' : 'approved'
+  const state = a.uploadPolicy?.review || s.mode === 'all' || flags.length ? 'pending' : 'approved'
   await pool.query(
-    `update "asset" set moderation = $2, "moderationFlags" = $3, "moderatedBy" = null, "moderatedAt" = null, "moderationNote" = null where id = $1`,
+    `update "asset" set moderation = $2, "moderationFlags" = $3, "moderatedBy" = null, "moderatedAt" = null, "moderationNote" = null where id = $1 and "deletedAt" is null`,
     [id, state, JSON.stringify(flags)],
   )
   if (state === 'pending') await emitAsset(id, 'asset.review_required')
@@ -202,13 +202,13 @@ export async function handleModeration(req: Request, sub?: string) {
     const state = new URL(req.url).searchParams.get('state') ?? 'pending'
     if (!['pending', 'rejected', 'approved'].includes(state)) throw new HttpError(400, 'state must be pending, rejected or approved.')
     const { rows } = await pool.query<{ id: string }>(
-      `select id from "asset" where "organizationId" = $1 and moderation = $2 and ($2 <> 'approved' or "moderatedAt" is not null)
+      `select id from "asset" where "organizationId" = $1 and "deletedAt" is null and moderation = $2 and ($2 <> 'approved' or "moderatedAt" is not null)
         order by case when jsonb_array_length("moderationFlags") > 0 then 0 else 1 end, coalesce("moderatedAt", "createdAt") desc limit 300`,
       [orgId, state],
     )
     const assets = (await Promise.all(rows.map((r) => getAssetRow(r.id, orgId)))).filter((a): a is AssetRow => Boolean(a)).map(toDTO)
     const { rows: counts } = await pool.query<{ moderation: string; n: number }>(
-      `select moderation, count(*)::int as n from "asset" where "organizationId" = $1 and moderation <> 'approved' group by moderation`,
+      `select moderation, count(*)::int as n from "asset" where "organizationId" = $1 and "deletedAt" is null and moderation <> 'approved' group by moderation`,
       [orgId],
     )
     return Response.json({ assets, counts: Object.fromEntries(counts.map((c) => [c.moderation, c.n])) }, { headers: { 'Cache-Control': 'no-store' } })
@@ -225,7 +225,7 @@ export async function handleModeration(req: Request, sub?: string) {
     if (decision === 'approved' && held.length) throw new HttpError(409, 'MediaEX took this down, so it can’t be approved here. Contact MediaEX support.')
     const { rowCount } = await pool.query(
       `update "asset" set moderation = $3, "moderatedBy" = $4, "moderatedAt" = now(), "moderationNote" = $5, "updatedAt" = now()
-        where "organizationId" = $1 and id = any($2::text[])`,
+        where "organizationId" = $1 and "deletedAt" is null and id = any($2::text[])`,
       [orgId, ids, decision, user.id, note],
     )
     for (const id of ids) await emitAsset(id, decision === 'approved' ? 'asset.approved' : 'asset.rejected')
@@ -235,7 +235,7 @@ export async function handleModeration(req: Request, sub?: string) {
   if (sub === 'recheck' && req.method === 'POST') {
     if (!manage) throw new HttpError(403, 'Only owners and admins can run the checks again.')
     const ids = cleanIds(body.ids)
-    const { rows } = await pool.query<{ id: string }>(`select id from "asset" where "organizationId" = $1 and id = any($2::text[]) and status = 'ready'`, [orgId, ids])
+    const { rows } = await pool.query<{ id: string }>(`select id from "asset" where "organizationId" = $1 and "deletedAt" is null and id = any($2::text[]) and status = 'ready'`, [orgId, ids])
     for (const r of rows) await reviewAsset(r.id, true)
     return Response.json({ changed: rows.length })
   }
