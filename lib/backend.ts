@@ -112,7 +112,7 @@ export async function proxyMedia(request: Request) {
     const outgoing = new Headers()
     for (const name of [
       'content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control', 'content-disposition',
-      'location', 'etag', 'last-modified', 'access-control-allow-origin', 'retry-after',
+      'location', 'etag', 'last-modified', 'vary', 'access-control-allow-origin', 'retry-after',
     ]) {
       const value = response.headers.get(name)
       if (value !== null) outgoing.set(name, value)

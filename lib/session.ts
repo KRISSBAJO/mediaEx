@@ -2,7 +2,7 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { cache } from 'react'
 import type { Account } from '@/components/app/account'
-import type { MediaAsset } from '@/lib/media/types'
+import type { MediaAsset, WorkspaceAssetSummary } from '@/lib/media/types'
 import { authCookies, backendFetch } from './backend'
 
 async function readAuthenticated(path: string) {
@@ -25,9 +25,10 @@ export async function requireAccount(): Promise<Account> {
 }
 
 /** The active workspace's assets, for the dashboard's first render (the browser keeps them fresh afterwards). */
-export async function getWorkspaceAssets(): Promise<MediaAsset[]> {
-  const body = (await readAuthenticated('/api/assets')) as { assets: MediaAsset[] } | null
-  return body?.assets ?? []
+export async function getWorkspaceAssets() {
+  const body = (await readAuthenticated('/api/assets?view=recent')) as { assets: MediaAsset[]; summary: WorkspaceAssetSummary } | null
+  if (!body) redirect('/sign-in?next=%2Fdashboard')
+  return body
 }
 
 /** One asset in the active workspace, or null when it doesn't exist there. */
