@@ -103,7 +103,7 @@ export function sign(secret: string, body: string, t = Math.floor(Date.now() / 1
 
 /** fetch() reports every network failure as "fetch failed"; the cause says what actually went wrong. */
 function networkError(e: Error) {
-  const cause = (e as Error & { cause?: { code?: string; message?: string } }).cause
+  const cause = (e as Error & { cause?: { code?: string } }).cause
   const code = cause?.code ?? ''
   const known: Record<string, string> = {
     ENOTFOUND: 'The host name doesn’t resolve',
@@ -119,8 +119,8 @@ function networkError(e: Error) {
     UNABLE_TO_VERIFY_LEAF_SIGNATURE: 'Its TLS certificate can’t be verified',
     ERR_TLS_CERT_ALTNAME_INVALID: 'Its TLS certificate doesn’t match the host name',
   }
-  if (known[code]) return `${known[code]} (${code})`
-  return (cause?.message ? `${e.message}: ${cause.message}` : e.message).slice(0, 300)
+  if (Object.hasOwn(known, code)) return `${known[code]} (${code})`
+  return 'Could not reach the webhook endpoint.'
 }
 
 async function deliver(d: { id: string; endpointId: string; payload: unknown; attempts: number; url: string; secret: string; event: string }) {
