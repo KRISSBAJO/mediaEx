@@ -150,7 +150,7 @@ function CollectionRow({ id, name, count, active, onOpen, onDrop, setDialog }: {
 
 export default function LibrarySidebar({ query, go, onDropAssets }: Props) {
   const lib = useLibrary()
-  const { assets } = useMedia()
+  const { summary } = useMedia()
   const [dialog, setDialog] = useState<Dialog>(null)
   // open the path to the current folder; remember what people expand
   const [open, setOpen] = useState<Set<string>>(() => new Set())
@@ -161,7 +161,6 @@ export default function LibrarySidebar({ query, go, onDropAssets }: Props) {
   }, [query.folder, lib])
   const toggle = (id: string) => setOpen((o) => (o.has(id) ? new Set([...o].filter((x) => x !== id)) : new Set([...o, id])))
 
-  const unfiled = assets.filter((a) => !a.folderId).length
   const allActive = !query.folder && !query.collection
   const rootDrop = useDrop((ids) => onDropAssets({ folderId: null }, ids))
   const roots = lib.folders.filter((f) => !f.parentId).sort((a, b) => a.name.localeCompare(b.name))
@@ -173,14 +172,14 @@ export default function LibrarySidebar({ query, go, onDropAssets }: Props) {
           <button type="button" className="lib-row-main" aria-current={allActive ? 'true' : undefined} onClick={() => go({ sort: query.sort })}>
             <Icon name="grid" size={15} />
             <span>All assets</span>
-            <em>{assets.length || ''}</em>
+            <em>{summary.total || ''}</em>
           </button>
         </div>
         <div className={`lib-row ${query.folder === 'root' ? 'is-on' : ''} ${rootDrop.over ? 'is-drop' : ''}`} {...rootDrop.props}>
           <button type="button" className="lib-row-main" aria-current={query.folder === 'root' ? 'true' : undefined} onClick={() => go({ folder: 'root', sort: query.sort })} title="Assets that aren’t in any folder">
             <Icon name="file" size={15} />
             <span>Not in a folder</span>
-            <em>{unfiled || ''}</em>
+            <em>{summary.unfiled || ''}</em>
           </button>
         </div>
       </div>
