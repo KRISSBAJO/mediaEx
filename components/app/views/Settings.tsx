@@ -56,7 +56,7 @@ function General() {
     setErr('')
     const { error } = await authClient.organization.update({ organizationId: workspace.id, data: { name: name.trim(), slug } })
     setSaving(false)
-    if (error) return setErr(error.code?.includes('SLUG') ? 'That URL is already taken. Try another.' : authMessage(error, 'Couldn’t save the workspace.'))
+    if (error) return setErr(error.code?.includes('SLUG') ? 'That workspace slug is already taken. Try another.' : authMessage(error, 'Couldn’t save the workspace.'))
     toast('Workspace saved')
     router.refresh()
   }
@@ -96,24 +96,21 @@ function General() {
           )
         }
       >
-        <p className="setting-desc">The name your team sees in the workspace switcher and on invitations, and the address used for review links.</p>
+        <p className="setting-desc">Your team sees the workspace name in the switcher and on invitations. The slug uniquely identifies the workspace.</p>
         <form id="ws-form" onSubmit={save} noValidate>
           <label className="setting-field">
             <span>Name</span>
             <input className="input" value={name} disabled={!manage} onChange={(e) => (setName(e.target.value), setErr(''))} />
           </label>
           <label className="setting-field">
-            <span>URL</span>
-            <div className="input-prefix">
-              <em>mediaex.io/</em>
-              <input
-                className="input"
-                value={slug}
-                disabled={!manage}
-                onChange={(e) => (setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '')), setErr(''))}
-                aria-invalid={!slugOk}
-              />
-            </div>
+            <span>Workspace slug</span>
+            <input
+              className="input"
+              value={slug}
+              disabled={!manage}
+              onChange={(e) => (setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '')), setErr(''))}
+              aria-invalid={!slugOk}
+            />
             {!slugOk && <small className="is-bad">Use 2–48 lowercase letters, numbers or dashes.</small>}
           </label>
         </form>
@@ -141,7 +138,7 @@ function General() {
             <p>
               Type <b>{workspace.slug}</b> to confirm. The workspace, its members and invitations are removed permanently.
             </p>
-            <input className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoFocus aria-label="Workspace URL to confirm" />
+            <input className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoFocus aria-label="Workspace slug to confirm" />
             <div className="dialog-foot">
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDeleting(false)}>
                 Cancel

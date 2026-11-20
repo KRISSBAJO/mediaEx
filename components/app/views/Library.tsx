@@ -60,24 +60,40 @@ export default function Library() {
   )
 
   /* ------------------------------------------------ results, from the server, kept fresh by the polled asset list */
-  const [found, setFound] = useState<MediaAsset[] | null>(null)
+  const [result, setResult] = useState<{ query: string; assets: MediaAsset[] | null; error: string } | null>(null)
   const [loading, setLoading] = useState(false)
-  const seq = useRef(0)
-  useEffect(() => {
-    const mine = ++seq.current
+  const pending = useRef<AbortController | null>(null)
+  const search = useCallback(async () => {
+    if (pending.current) return
+    const controller = new AbortController()
+    pending.current = controller
     setLoading(true)
-    const id = setTimeout(async () => {
-      try {
-        const { assets } = await request<{ assets: MediaAsset[] }>(`/api/assets?${paramString}`)
-        if (mine === seq.current) setFound(assets)
-      } catch (e) {
-        if (mine === seq.current) toast(e instanceof Error ? e.message : 'Couldn’t search the library.')
-      } finally {
-        if (mine === seq.current) setLoading(false)
+    try {
+      const { assets } = await request<{ assets: MediaAsset[] }>(`/api/assets?${paramString}`, { signal: controller.signal })
+      if (!controller.signal.aborted) setResult({ query: paramString, assets, error: '' })
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        const error = e instanceof Error ? e.message : 'Please try again.'
+        setResult(previous => ({ query: paramString, assets: previous?.query === paramString ? previous.assets : null, error }))
       }
-    }, 120)
-    return () => clearTimeout(id)
-  }, [paramString, media.assets])
+    } finally {
+      if (pending.current === controller) {
+        pending.current = null
+        setLoading(false)
+      }
+    }
+  }, [paramString])
+  useEffect(() => () => {
+    pending.current?.abort()
+    pending.current = null
+  }, [paramString])
+  useEffect(() => {
+    const timer = setTimeout(search, 120)
+    return () => clearTimeout(timer)
+  }, [search, media.assets])
+  const current = result?.query === paramString ? result : null
+  const found = current?.assets ?? null
+  const searchError = current?.error
   // the polled list has the freshest status for anything still processing
   const list = useMemo(() => (found ?? []).map((a) => media.get(a.id) ?? a), [found, media])
 
@@ -96,7 +112,12 @@ export default function Library() {
   useEffect(() => {
     if (preview && !media.get(preview)) setPreview(null)
   }, [preview, media])
-  useEffect(() => setSelected(new Set()), [query.folder, query.collection])
+  useEffect(() => {
+    setSelected(new Set())
+    setAnchor(null)
+    setPreview(null)
+    setDialog(null)
+  }, [paramString])
 
   const toggle = (id: string, range: boolean) => {
     setSelected((s) => {
@@ -115,8 +136,8 @@ export default function Library() {
     })
     setAnchor(id)
   }
-  const ids = [...selected]
-  const selecting = selected.size > 0
+  const ids = list.filter(asset => selected.has(asset.id)).map(asset => asset.id)
+  const selecting = ids.length > 0
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -166,29 +187,6 @@ export default function Library() {
   const stored = list.reduce((t, a) => t + a.size + a.outputSize, 0)
   const sub = found === null ? 'Loading…' : `${n(list.length)}${filtered ? ' match' + (list.length === 1 ? 'es' : '') : ''} · ${bytes(stored)}${collection?.description ? ` · ${collection.description}` : ''}`
 
-  if (!media.assets.length && !lib.folders.length) {
-    return (
-      <>
-        <div className="page-head">
-          <div>
-            <h1>Library</h1>
-            <p>Everything you upload lands here, ready to stream.</p>
-          </div>
-        </div>
-        <Card>
-          <div className="empty">
-            <Icon name="library" size={22} />
-            <b>Your library is empty</b>
-            <p>Upload a video, audio file or image. MediaEX encodes it for streaming, and you can sort it into folders and collections.</p>
-            <Link href="/dashboard/uploads" className="btn btn-primary btn-sm">
-              <Icon name="upload" size={15} /> Upload files
-            </Link>
-          </div>
-        </Card>
-      </>
-    )
-  }
-
   return (
     <>
       <div className="page-head lib-head">
@@ -207,7 +205,7 @@ export default function Library() {
             </nav>
           )}
           <h1>{title}</h1>
-          <p>{sub}</p>
+          {(!searchError || found !== null) && <p>{sub}</p>}
         </div>
         <div className="page-actions">
           {!collection && (
@@ -226,6 +224,13 @@ export default function Library() {
 
         <section className="lib-main" aria-label="Assets">
           <Filters query={query} go={go} onSave={() => setDialog('save')} />
+          {searchError && (
+            <div className="banner is-bad" role="alert">
+              <Icon name="alert" />
+              <div><b>{found === null ? 'Couldn’t load library results.' : 'Couldn’t refresh library results.'}</b> {searchError}</div>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={loading} onClick={search}>Retry</button>
+            </div>
+          )}
 
           <div className={`lib-bar ${selecting ? 'is-selecting' : ''}`} role={selecting ? 'toolbar' : undefined} aria-label={selecting ? 'Selected assets' : undefined}>
             {selecting ? (
@@ -233,8 +238,8 @@ export default function Library() {
                 <button type="button" className="icon-btn is-quiet" aria-label="Clear selection" onClick={() => setSelected(new Set())}>
                   <Icon name="x" size={16} />
                 </button>
-                <b>{selected.size} selected</b>
-                {selected.size < list.length && (
+                <b>{ids.length} selected</b>
+                {ids.length < list.length && (
                   <button type="button" className="btn btn-quiet btn-sm" onClick={() => setSelected(new Set(list.map((a) => a.id)))}>
                     Select all {list.length}
                   </button>
@@ -291,13 +296,15 @@ export default function Library() {
             <Card>
               <div className="empty">
                 <Icon name={filtered ? 'search' : collection ? 'layers' : 'library'} size={22} />
-                <b>{filtered ? 'Nothing matches' : collection ? 'This collection is empty' : folder ? 'This folder is empty' : 'Nothing here'}</b>
+                <b>{filtered ? 'Nothing matches' : collection ? 'This collection is empty' : folder ? 'This folder is empty' : query.folder === 'root' ? 'No unfiled assets' : 'Your library is empty'}</b>
                 <p>
                   {filtered
                     ? 'Try fewer words, or clear a filter.'
                     : collection
                       ? 'Select assets anywhere in the library and choose Collect, or drag them onto the collection.'
-                      : 'Drag assets onto this folder in the list, or upload straight into it.'}
+                      : folder
+                        ? 'Drag assets onto this folder in the list, or upload straight into it.'
+                        : 'Upload a video, audio file or image, or create a folder or collection to organize your media.'}
                 </p>
                 {filtered ? (
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => go({ folder: query.folder, collection: query.collection })}>
@@ -307,7 +314,9 @@ export default function Library() {
                   <Link href={`/dashboard/uploads?folder=${folder.id}`} className="btn btn-ghost btn-sm">
                     Upload into {folder.name}
                   </Link>
-                ) : null}
+                ) : !collection && (
+                  <Link href="/dashboard/uploads" className="btn btn-primary btn-sm">Upload files</Link>
+                )}
               </div>
             </Card>
           ) : view === 'grid' ? (
