@@ -4,7 +4,11 @@
  */
 import { getMigrations } from 'better-auth/db/migration'
 import { auth, pool } from './auth.mts'
-import { MEDIA_SCHEMA } from './media/schema.mts'
+import { MEDIA_SCHEMA, LIBRARY_INDEXES } from './media/schema.mts'
+import { migrateStorage } from './media/storage-schema.mts'
+import { RECOVERY_SCHEMA } from './media/recovery-schema.mts'
+import { PRESET_SCHEMA } from './media/preset-schema.mts'
+import { OPERATIONS_SCHEMA } from './media/operations-schema.mts'
 
 if (!process.env.DATABASE_URL) {
   console.error('[migrate] DATABASE_URL is not set.')
@@ -20,5 +24,10 @@ if (!toBeCreated.length && !toBeAdded.length) {
   console.log('[migrate] Done.')
 }
 await pool.query(MEDIA_SCHEMA)
+await migrateStorage(pool)
+await pool.query(RECOVERY_SCHEMA)
+await pool.query(LIBRARY_INDEXES)
+await pool.query(PRESET_SCHEMA)
+await pool.query(OPERATIONS_SCHEMA)
 console.log('[migrate] Media tables are up to date.')
 await pool.end()
