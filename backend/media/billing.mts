@@ -65,6 +65,12 @@ async function subscriptionOf(orgId: string): Promise<SubRow | null> {
 
 /** The plan a workspace has right now: a paid plan until its period ends (cancelled or not), else Creator. */
 export async function planOf(orgId: string): Promise<PlanId> {
+  // a site admin's override (a comp, a trial, a correction) wins while it lasts
+  const { rows: o } = await pool.query<{ planOverride: PlanId }>(
+    `select "planOverride" from "workspace_admin" where "organizationId" = $1 and "planOverride" is not null and ("overrideUntil" is null or "overrideUntil" > now())`,
+    [orgId],
+  )
+  if (o[0]) return o[0].planOverride
   const s = await subscriptionOf(orgId)
   if (!s || !PAID.includes(s.plan)) return 'creator'
   // a failed renewal keeps the plan for a week's grace

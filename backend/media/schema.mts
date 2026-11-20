@@ -217,6 +217,31 @@ create table if not exists "billing_plan" (
   primary key ("provider", "plan", "interval", "currency", "amount")
 );
 
+-- site admin (see backend/admin.mts): an audit log of every admin action, per-workspace admin state, asset takedowns
+create table if not exists "admin_audit" (
+  "id"         text primary key,
+  "adminId"    text,
+  "adminEmail" text,
+  "action"     text not null,
+  "targetType" text not null,
+  "targetId"   text,
+  "details"    jsonb not null default '{}'::jsonb,
+  "createdAt"  timestamptz not null default now()
+);
+create index if not exists "admin_audit_created_idx" on "admin_audit" ("createdAt" desc);
+create index if not exists "admin_audit_target_idx" on "admin_audit" ("targetType", "targetId");
+create table if not exists "workspace_admin" (
+  "organizationId"  text primary key references "organization"("id") on delete cascade,
+  "suspendedAt"     timestamptz,
+  "suspendReason"   text,
+  "planOverride"    text,
+  "overrideUntil"   timestamptz,
+  "note"            text,
+  "updatedAt"       timestamptz not null default now()
+);
+alter table "asset" add column if not exists "takenDown" text;
+alter table "asset" add column if not exists "takenDownAt" timestamptz;
+
 -- multipart uploads in progress: { uploadId, partSize, partCount } until the parts are joined (see routes.mts)
 alter table "asset" add column if not exists "upload" jsonb;
 

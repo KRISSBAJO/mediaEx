@@ -268,7 +268,9 @@ async function update(id: string, fields: Record<string, unknown>) {
 async function claim(): Promise<AssetRow | null> {
   const { rows } = await pool.query<AssetRow>(
     `update "asset" set status = 'processing', stage = 1, progress = 0, error = null, attempts = attempts + 1, "updatedAt" = now()
-      where id = (select id from "asset" where status = 'queued' order by "createdAt" for update skip locked limit 1)
+      where id = (select id from "asset" where status = 'queued'
+                    and not exists (select 1 from "workspace_admin" w where w."organizationId" = "asset"."organizationId" and w."suspendedAt" is not null)
+                    order by "createdAt" for update skip locked limit 1)
       returning *`,
   )
   return rows[0] ?? null

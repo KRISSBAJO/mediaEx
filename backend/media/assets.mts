@@ -45,6 +45,10 @@ export type AssetRow = {
   upload: { uploadId: string; partSize: number; partCount: number } | null
   playlists: Partial<Record<'hevc' | 'av1', string>>
   captions?: { lang: string; label: string; source: 'auto' | 'upload'; status: 'queued' | 'processing' | 'ready' | 'failed'; error: string | null }[]
+  /** set by a site admin: the asset is private, and only a site admin can restore it */
+  takenDown: string | null
+  /** the workspace is suspended by a site admin */
+  orgSuspended?: boolean
 }
 
 /** the largest file anyone can upload; above SINGLE_PUT_BYTES it has to go in parts */
@@ -91,6 +95,7 @@ export function toDTO(a: AssetRow): MediaAsset {
     moderationFlags: a.moderationFlags ?? [],
     moderationNote: a.moderationNote ?? null,
     playback: a.playback ?? 'public',
+    takenDown: a.takenDown ?? null,
     captions: (a.captions ?? []).map((c) => ({ ...c, url: c.status === 'ready' ? `/api/media/${a.id}/captions/${c.lang}.vtt` : null })),
   }
 }
@@ -106,7 +111,8 @@ export function apiAsset(a: AssetRow): MediaAsset {
 const SELECT = `select a.*, u.name as "createdByName",
     coalesce((select array_agg(ca."collectionId" order by ca."addedAt") from "collection_asset" ca where ca."assetId" = a.id), '{}') as "collectionIds",
     coalesce((select json_agg(json_build_object('lang', c.lang, 'label', c.label, 'source', c.source, 'status', c.status, 'error', c.error) order by c.source, c.label)
-      from "caption" c where c."assetId" = a.id), '[]') as "captions"
+      from "caption" c where c."assetId" = a.id), '[]') as "captions",
+    exists (select 1 from "workspace_admin" w where w."organizationId" = a."organizationId" and w."suspendedAt" is not null) as "orgSuspended"
   from "asset" a left join "user" u on u.id = a."createdBy"`
 
 export async function listAssets(orgId: string): Promise<AssetRow[]> {
@@ -194,7 +200,17 @@ export async function requireMember(headers: Headers) {
   if (!orgId) throw new HttpError(400, 'Choose a workspace first.')
   const { rows } = await pool.query<{ role: string }>('select role from "member" where "userId" = $1 and "organizationId" = $2 limit 1', [session.user.id, orgId])
   if (!rows[0]) throw new HttpError(403, 'You’re not a member of this workspace.')
+  await assertNotSuspended(orgId)
   return { user: session.user, orgId, role: rows[0].role.split(',')[0] }
+}
+
+/** A workspace a site admin suspended can't be used: dashboard, API keys and uploads all stop. */
+export async function assertNotSuspended(orgId: string) {
+  const { rows } = await pool.query<{ suspendReason: string | null }>(
+    'select "suspendReason" from "workspace_admin" where "organizationId" = $1 and "suspendedAt" is not null',
+    [orgId],
+  )
+  if (rows[0]) throw new HttpError(423, `This workspace is suspended${rows[0].suspendReason ? `: ${rows[0].suspendReason}` : ''}. Contact MediaEX support.`)
 }
 
 /** Is this user a member of the asset's workspace (any workspace, not only the active one)? */

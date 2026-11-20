@@ -220,6 +220,9 @@ export async function handleModeration(req: Request, sub?: string) {
     const decision = body.decision === 'approve' ? 'approved' : body.decision === 'reject' ? 'rejected' : null
     if (!decision) throw new HttpError(400, 'decision must be approve or reject.')
     const note = typeof body.note === 'string' ? body.note.trim().slice(0, 300) || null : null
+    // a site admin's takedown outranks the workspace's own review
+    const { rows: held } = await pool.query<{ id: string }>(`select id from "asset" where "organizationId" = $1 and id = any($2::text[]) and "takenDown" is not null`, [orgId, ids])
+    if (decision === 'approved' && held.length) throw new HttpError(409, 'MediaEX took this down, so it can’t be approved here. Contact MediaEX support.')
     const { rowCount } = await pool.query(
       `update "asset" set moderation = $3, "moderatedBy" = $4, "moderatedAt" = now(), "moderationNote" = $5, "updatedAt" = now()
         where "organizationId" = $1 and id = any($2::text[])`,
@@ -240,4 +243,4 @@ export async function handleModeration(req: Request, sub?: string) {
 }
 
 /** Can this request see the asset publicly? Approved assets: anyone with the link. Otherwise: workspace members only. */
-export const isPublic = (a: Pick<AssetRow, 'moderation'>) => a.moderation === 'approved'
+export const isPublic = (a: Pick<AssetRow, 'moderation' | 'takenDown' | 'orgSuspended'>) => a.moderation === 'approved' && !a.takenDown && !a.orgSuspended

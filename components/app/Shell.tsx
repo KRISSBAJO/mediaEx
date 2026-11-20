@@ -182,6 +182,11 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
               <Link href="/" role="menuitem" onClick={() => setMe(false)}>
                 <Icon name="external" size={15} /> MediaEX home
               </Link>
+              {user.isAdmin && (
+                <Link href="/admin" role="menuitem" onClick={() => setMe(false)}>
+                  <Icon name="key" size={15} /> Site admin
+                </Link>
+              )}
               <hr />
               <button type="button" role="menuitem" onClick={signOut}>
                 <Icon name="logout" size={15} /> Sign out
@@ -377,8 +382,12 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   }, [drawer])
 
   const trail = crumbs(path, account.workspace.name, assets)
+  const imp = account.impersonation
+  const suspended = account.workspace.suspended
 
   return (
+    <>
+    {imp && <ImpersonationBar name={account.user.name} email={account.user.email} by={imp.by} expiresAt={imp.expiresAt} />}
     <div className={`app ${drawer ? 'drawer-open' : ''}`}>
       <aside className="side" aria-label="Sidebar">
         <Sidebar onNavigate={() => setDrawer(false)} onNewWorkspace={() => setNewWs(true)} />
@@ -425,12 +434,52 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             </Link>
           </div>
         </header>
-        <main className="content">{children}</main>
+        <main className="content">
+          {suspended ? (
+            <div className="suspended-screen" role="alert">
+              <div>
+                <Icon name="alert" size={26} />
+                <h1>This workspace is suspended</h1>
+                <p>
+                  {suspended.reason ? `${suspended.reason}. ` : ''}Its media isn’t playing for anyone outside the workspace, and nothing new can be uploaded or encoded. Contact MediaEX
+                  support to sort it out. You can switch to another workspace from the menu.
+                </p>
+              </div>
+            </div>
+          ) : (
+            children
+          )}
+        </main>
       </div>
 
       <CommandMenu open={cmd} onClose={() => setCmd(false)} />
       {newWs && <NewWorkspace onClose={() => setNewWs(false)} />}
       <Toaster />
+    </div>
+    </>
+  )
+}
+
+/** Shown on every dashboard page while a site admin is signed in as someone else. */
+function ImpersonationBar({ name, email, by, expiresAt }: { name: string; email: string; by: string; expiresAt: string }) {
+  const [busy, setBusy] = useState(false)
+  const stop = async () => {
+    setBusy(true)
+    const res = await fetch('/api/auth/admin/stop-impersonating', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+    if (!res.ok) {
+      setBusy(false)
+      return toast('Couldn’t stop impersonating. Sign out to end it.')
+    }
+    window.location.href = '/admin/users'
+  }
+  return (
+    <div className="imp-bar" role="status">
+      <span>
+        {by}, you’re signed in as {name} ({email}). Everything you do happens as them. Ends {new Date(expiresAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}.
+      </span>
+      <button type="button" onClick={stop} disabled={busy}>
+        {busy ? 'Stopping…' : 'Stop impersonating'}
+      </button>
     </div>
   )
 }

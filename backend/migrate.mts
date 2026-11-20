@@ -21,4 +21,10 @@ if (!toBeCreated.length && !toBeAdded.length) {
 }
 await pool.query(MEDIA_SCHEMA)
 console.log('[migrate] Media tables are up to date.')
+// SITE_ADMIN_EMAILS are always admins (others are managed from the admin dashboard)
+const admins = (process.env.SITE_ADMIN_EMAILS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
+if (admins.length) {
+  const { rowCount } = await pool.query(`update "user" set role = 'admin' where lower(email) = any($1::text[]) and coalesce(role, '') <> 'admin'`, [admins])
+  console.log(`[migrate] Site admins from SITE_ADMIN_EMAILS: ${admins.length} listed${rowCount ? `, ${rowCount} promoted` : ''}.`)
+}
 await pool.end()
