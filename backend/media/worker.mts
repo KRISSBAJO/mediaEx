@@ -3,7 +3,8 @@
  * assets from Postgres one at a time and turns each original into streamable outputs with FFmpeg:
  *
  *   Analyse  ffprobe: what is it, how long, how big; plus a thumbnail (a frame, or a waveform for audio)
- *   Encode   video → H.264/AAC HLS ladder (1080p…360p, never above the source); audio → AAC HLS; image → poster
+ *   Encode   video → H.264/AAC HLS ladder (1080p…360p, never above the source), plus HEVC/AV1 ladders when the
+ *            workspace asks for them (encoding.mts); audio → AAC HLS; image → poster
  *   Package  master playlist, sizes, publish to storage
  *
  * Jobs are claimed with `for update skip locked`, so several app instances can share the queue safely.
@@ -17,8 +18,11 @@ import { pool } from '../auth.mts'
 import { prefixOf, type AssetRow } from './assets.mts'
 import { reviewAsset } from './moderation.mts'
 import { emitAsset } from './webhooks.mts'
+import { encoderFor, extraCodecsFor, type Encoder } from './encoding.mts'
+import { captionsAfterReady } from './captions.mts'
+import { maxShortSide } from './billing.mts'
 import { storage } from './storage.mts'
-import type { MediaType, Rendition } from './types.mts'
+import type { ExtraCodec, MediaType, Rendition } from './types.mts'
 
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg'
 const FFPROBE = process.env.FFPROBE_PATH || 'ffprobe'
@@ -145,12 +149,16 @@ function analyse(p: Probe, guessed: MediaType) {
   } else if (video) {
     parts.push(codecName(video.codec_name), `${width}×${height}`)
   }
-  return { type, duration: type === 'image' ? 0 : duration, width, height, hasAudio: !!audio, sourceInfo: parts.join(' · ') }
+  const frameRate = video ? fps(video.avg_frame_rate) || fps(video.r_frame_rate) : 0
+  return { type, duration: type === 'image' ? 0 : duration, width, height, hasAudio: !!audio, sourceInfo: parts.join(' · '), fps: frameRate }
 }
 
 /* ------------------------------------------------ encode */
 // rungs are named by the short side, so vertical video gets the same ladder as landscape
 const LADDER = [
+  { short: 4320, kbps: 40000 },
+  { short: 2160, kbps: 16000 },
+  { short: 1440, kbps: 9000 },
   { short: 1080, kbps: 5000 },
   { short: 720, kbps: 2800 },
   { short: 480, kbps: 1400 },
@@ -158,14 +166,78 @@ const LADDER = [
 ]
 const even = (n: number) => Math.max(2, Math.round(n / 2) * 2)
 
-function ladderFor(width: number, height: number) {
+/** rungs at or below the source, up to the plan's ceiling (1080p on Creator, 4K on Pro, 8K on Studio) */
+function ladderFor(width: number, height: number, ceiling = 1080) {
   const short = Math.min(width, height)
-  const rungs = LADDER.filter((r) => r.short <= short)
+  const rungs = LADDER.filter((r) => r.short <= short && r.short <= ceiling)
   if (!rungs.length) rungs.push({ short: even(short), kbps: 600 })
   return rungs.map((r) => {
     const scale = r.short / short
     return { ...r, width: even(width * scale), height: even(height * scale) }
   })
+}
+
+type Rung = ReturnType<typeof ladderFor>[number]
+type Codec = 'h264' | ExtraCodec
+const CODEC_LABEL: Record<Codec, string> = { h264: 'H.264', hevc: 'HEVC', av1: 'AV1' }
+// newer codecs need fewer bits for the same picture
+const BITRATE_SCALE: Record<Codec, number> = { h264: 1, hevc: 0.65, av1: 0.55 }
+// roughly how long each takes to encode, to share out the progress bar
+const EFFORT: Record<Codec, number> = { h264: 1, hevc: 1.6, av1: 3 }
+
+/**
+ * One adaptive ladder in `dir` (its own master.m3u8, one folder per rung). H.264 keeps MPEG-TS segments, which every
+ * HLS player reads; HEVC and AV1 use fMP4, which they require. A failing GPU encode is retried on the CPU.
+ */
+export async function encodeLadder(
+  input: string,
+  dir: string,
+  rungs: Rung[],
+  info: { hasAudio: boolean; fps: number },
+  codec: Codec,
+  onProgress: (line: string) => void,
+): Promise<Encoder> {
+  let enc: Encoder | null = await encoderFor(codec)
+  if (!enc) throw new Error(`This server’s FFmpeg has no ${CODEC_LABEL[codec]} encoder.`)
+  const fmp4 = codec !== 'h264'
+  const gop = Math.max(12, Math.round((info.fps || 24) * 2)) // a keyframe every 2 s, so 6 s segments cut cleanly
+  for (;;) {
+    const e: Encoder = enc
+    const split =
+      `[0:v]split=${rungs.length}${rungs.map((_, i) => `[s${i}]`).join('')};` +
+      rungs.map((r, i) => `[s${i}]scale=${r.width}:${r.height}:flags=bicubic,format=${e.pixFmt}[v${i}]`).join(';')
+    const args = ['-y', '-v', 'error', '-i', input, '-filter_complex', split]
+    rungs.forEach((r, i) => {
+      const k = Math.round(r.kbps * BITRATE_SCALE[codec])
+      args.push('-map', `[v${i}]`, `-c:v:${i}`, e.name, `-b:v:${i}`, `${k}k`, `-maxrate:v:${i}`, `${Math.round(k * 1.07)}k`, `-bufsize:v:${i}`, `${Math.round(k * 1.5)}k`)
+      if (info.hasAudio) args.push('-map', '0:a:0')
+    })
+    args.push(
+      ...e.args, '-g', String(gop),
+      ...(e.name === 'libx264' || e.name === 'libx265' ? ['-sc_threshold', '0'] : []),
+      ...(codec !== 'av1' ? ['-force_key_frames', 'expr:gte(t,n_forced*2)'] : []),
+      ...(info.hasAudio ? ['-c:a', 'aac', '-b:a', '128k', '-ac', '2'] : []),
+      '-f', 'hls', '-hls_time', '6', '-hls_playlist_type', 'vod', '-hls_flags', 'independent_segments',
+      ...(fmp4 ? ['-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4'] : []),
+      '-master_pl_name', 'master.m3u8',
+      '-hls_segment_filename', fmp4 ? 'v%v/seg_%03d.m4s' : 'v%v/seg_%03d.ts',
+      '-var_stream_map', rungs.map((_, i) => (info.hasAudio ? `v:${i},a:${i}` : `v:${i}`)).join(' '),
+      '-progress', 'pipe:1', '-nostats',
+      'v%v/index.m3u8',
+    )
+    await mkdir(dir, { recursive: true })
+    try {
+      // run inside the output folder with relative, forward-slash paths so playlists never contain Windows separators
+      await run(FFMPEG, args, onProgress, dir)
+      return e
+    } catch (err) {
+      const cpu: Encoder | null = e.hw ? await encoderFor(codec, false) : null
+      if (!cpu) throw err
+      console.warn(`[media] ${e.name} failed (${err instanceof Error ? err.message : err}); encoding ${CODEC_LABEL[codec]} on the CPU instead`)
+      await rm(dir, { recursive: true, force: true })
+      enc = cpu
+    }
+  }
 }
 
 async function dirSize(dir: string): Promise<number> {
@@ -244,30 +316,28 @@ async function processAsset(job: AssetRow) {
       void update(job.id, { progress: p })
     }
 
+    const playlists: Partial<Record<ExtraCodec, string>> = {}
     if (info.type === 'video') {
-      const rungs = ladderFor(info.width!, info.height!)
-      const hls = path.join(out, 'hls')
-      await mkdir(hls, { recursive: true })
-      const split = `[0:v]split=${rungs.length}${rungs.map((_, i) => `[s${i}]`).join('')};` + rungs.map((r, i) => `[s${i}]scale=${r.width}:${r.height}:flags=bicubic,format=yuv420p[v${i}]`).join(';')
-      const args = ['-y', '-v', 'error', '-i', input, '-filter_complex', split]
-      rungs.forEach((r, i) => {
-        args.push('-map', `[v${i}]`, `-c:v:${i}`, 'libx264', `-b:v:${i}`, `${r.kbps}k`, `-maxrate:v:${i}`, `${Math.round(r.kbps * 1.07)}k`, `-bufsize:v:${i}`, `${r.kbps * 1.5}k`)
-        if (info.hasAudio) args.push('-map', '0:a:0')
-      })
-      args.push(
-        '-preset', 'veryfast', '-profile:v', 'main', '-sc_threshold', '0', '-force_key_frames', 'expr:gte(t,n_forced*2)',
-        ...(info.hasAudio ? ['-c:a', 'aac', '-b:a', '128k', '-ac', '2'] : []),
-        '-f', 'hls', '-hls_time', '6', '-hls_playlist_type', 'vod', '-hls_flags', 'independent_segments',
-        '-master_pl_name', 'master.m3u8',
-        '-hls_segment_filename', 'v%v/seg_%03d.ts',
-        '-var_stream_map', rungs.map((_, i) => (info.hasAudio ? `v:${i},a:${i}` : `v:${i}`)).join(' '),
-        '-progress', 'pipe:1', '-nostats',
-        'v%v/index.m3u8',
-      )
-      // run inside the output folder with relative, forward-slash paths so playlists never contain Windows separators
-      await run(FFMPEG, args, onProgress(6, 94), hls)
-      for (const [i, r] of rungs.entries()) {
-        renditions.push({ name: `${r.short}p`, codec: info.hasAudio ? 'H.264 + AAC' : 'H.264', width: r.width, height: r.height, bitrate: r.kbps * 1000, size: await dirSize(path.join(hls, `v${i}`)) })
+      const rungs = ladderFor(info.width!, info.height!, await maxShortSide(job.organizationId))
+      const codecs: Codec[] = ['h264', ...(await extraCodecsFor(job.organizationId))]
+      const total = codecs.reduce((t, c) => t + EFFORT[c], 0)
+      let at = 6
+      for (const codec of codecs) {
+        const span = (88 * EFFORT[codec]) / total
+        // H.264 sits at hls/ (where existing links point); the others get a folder each
+        const dir = codec === 'h264' ? path.join(out, 'hls') : path.join(out, 'hls', codec)
+        const enc = await encodeLadder(input, dir, rungs, info, codec, onProgress(at, at + span))
+        at += span
+        for (const [i, r] of rungs.entries()) {
+          const suffix = codec === 'h264' ? '' : ` ${CODEC_LABEL[codec]}`
+          renditions.push({
+            name: `${r.short}p${suffix}`,
+            codec: `${CODEC_LABEL[codec]}${info.hasAudio ? ' + AAC' : ''}${enc.hw ? ' · GPU' : ''}`,
+            width: r.width, height: r.height, bitrate: Math.round(r.kbps * BITRATE_SCALE[codec]) * 1000,
+            size: await dirSize(path.join(dir, `v${i}`)),
+          })
+        }
+        if (codec !== 'h264') playlists[codec] = `${prefix}/hls/${codec}/master.m3u8`
       }
       playlistKey = `${prefix}/hls/master.m3u8`
     } else if (info.type === 'audio') {
@@ -298,11 +368,13 @@ async function processAsset(job: AssetRow) {
     await publish()
     await update(job.id, {
       status: 'ready', stage: 3, progress: 100, error: null, readyAt: new Date(),
-      thumbKey, posterKey, playlistKey, renditions: JSON.stringify(renditions), outputSize,
+      thumbKey, posterKey, playlistKey, playlists: JSON.stringify(playlists), renditions: JSON.stringify(renditions), outputSize,
     })
     // moderation: blocklist and optional automatic review decide whether it goes public
     await reviewAsset(job.id).catch((e) => console.error(`[media] ${job.id} moderation check failed:`, e instanceof Error ? e.message : e))
     await emitAsset(job.id, 'asset.ready')
+    // automatic captions run afterwards, so the asset is playable straight away
+    await captionsAfterReady(job).catch((e) => console.error(`[media] ${job.id} couldn’t queue captions:`, e instanceof Error ? e.message : e))
     console.log(`[media] ${job.id} ready in ${((Date.now() - t0) / 1000).toFixed(1)}s (${info.type}, ${renditions.length} outputs)`)
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)

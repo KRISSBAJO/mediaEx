@@ -414,6 +414,83 @@ export function verifyMediaEX(rawBody, header, secret) {
   )
 }
 
+/* ------------------------------------------------ playback signing */
+/** The workspace secret that signs playback links for assets set to "Signed links only". */
+function PlaybackSigning({ origin, manage }: { origin: string; manage: boolean }) {
+  const [secret, setSecret] = useState<string | null>(null)
+  const [rotating, setRotating] = useState(false)
+  const snippet = `import { createHmac } from 'node:crypto'
+
+// a link to one asset that stops working after \`ttl\` seconds
+export function signedLink(assetId, secret, ttl = 3600) {
+  const exp = Math.floor(Date.now() / 1000) + ttl
+  const sig = createHmac('sha256', secret).update(\`\${assetId}:\${exp}\`).digest('base64url')
+  return \`${origin}/embed/\${assetId}?token=\${exp}.\${sig}\`
+}
+
+// or ask the API for one:
+// POST ${origin}/api/v1/assets/:id/playback-token  { "expiresIn": 3600 }`
+  return (
+    <Card
+      title="Playback signing"
+      meta="For assets set to signed links only"
+      action={
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(snippet, 'Snippet copied')}>
+          <Icon name="copy" size={15} /> Copy
+        </button>
+      }
+    >
+      <p className="access-note">
+        Sign links on your own server with this secret, so viewers get links that expire. The token also works on the stream URL (
+        <code>?token=</code>). Rotating the secret ends every link signed with the old one.
+      </p>
+      {manage &&
+        (secret ? (
+          <div className="copy-row dev-sign-row">
+            <code>{secret}</code>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(secret, 'Signing secret copied')}>
+              <Icon name="copy" size={15} /> Copy
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRotating(true)}>
+              Rotate
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm dev-sign-row"
+            onClick={async () => {
+              const r = await call<{ secret: string }>('/api/playback/secret')
+              if (r) setSecret(r.secret)
+            }}
+          >
+            <Icon name="lock" size={15} /> Reveal signing secret
+          </button>
+        ))}
+      <pre className="snippet">
+        <code>{snippet}</code>
+      </pre>
+      {rotating && (
+        <ConfirmDialog
+          title="Rotate the signing secret?"
+          sub="Every signed link and token handed out so far stops working straight away. Update the secret on your servers after rotating."
+          action="Rotate secret"
+          danger
+          onClose={() => setRotating(false)}
+          onConfirm={async () => {
+            const r = await call<{ secret: string }>('/api/playback/secret/rotate', { method: 'POST' })
+            if (r) {
+              setSecret(r.secret)
+              toast('New signing secret — old links have stopped working')
+            }
+            setRotating(false)
+          }}
+        />
+      )}
+    </Card>
+  )
+}
+
 /* ------------------------------------------------ the page */
 export default function Developers() {
   const params = useSearchParams()
@@ -629,6 +706,7 @@ export default function Developers() {
           </Card>
 
           <Quickstart origin={origin} />
+          <PlaybackSigning origin={origin} manage={manage} />
         </div>
 
         <Card

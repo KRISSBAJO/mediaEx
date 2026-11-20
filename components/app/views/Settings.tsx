@@ -4,14 +4,17 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
 import { authClient, authMessage } from '@/lib/auth-client'
-import { USAGE } from '@/lib/sample'
+import { bytes } from '@/lib/sample'
+import type { BillingInterval, BillingState, PlanId } from '@/lib/media/types'
+import { request } from '../library'
 import { canManage, useAccount, type Role } from '../account'
 import Icon from '../Icon'
 import { Avatar, Card, Meter, PageHead, toast } from '../ui'
 import SettingsMetadata from './SettingsMetadata'
 import SettingsModeration from './SettingsModeration'
+import SettingsEncoding from './SettingsEncoding'
 
-type Tab = 'general' | 'team' | 'metadata' | 'moderation' | 'account' | 'billing'
+type Tab = 'general' | 'team' | 'metadata' | 'moderation' | 'encoding' | 'account' | 'billing'
 const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' }
 const ROLE_HELP: Record<Role, string> = {
   owner: 'Everything, including deleting the workspace',
@@ -427,54 +430,227 @@ function Account() {
   )
 }
 
-/* ------------------------------------------------ billing (not connected yet) */
+/* ------------------------------------------------ billing */
+const PLAN_BLURB: Record<PlanId, string> = {
+  creator: '100 GB storage, 1080p streaming, 50 processing minutes a month.',
+  pro: '2 TB storage, 4K streaming, 1,000 processing minutes a month, HEVC and AV1.',
+  studio: '10 TB storage then pay as you go, 8K streaming, unlimited processing, HEVC and AV1.',
+}
+const money = (amount: number, currency: string) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: amount % 1 ? 2 : 0 }).format(amount)
+// billing periods are UTC days
+const dateOf = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+
 function Billing() {
-  const rows = [
-    { label: 'Storage', ...USAGE.storage },
-    { label: 'Transcode minutes', ...USAGE.transcode },
-    { label: 'Bandwidth', ...USAGE.bandwidth },
-    { label: 'Caption hours', ...USAGE.captions },
-  ]
+  const { workspace } = useAccount()
+  const manage = canManage(workspace.role)
+  const params = useSearchParams()
+  const [b, setB] = useState<BillingState | null>(null)
+  const [interval, setInterval_] = useState<BillingInterval>('year')
+  const [busy, setBusy] = useState<string | null>(null)
+  const [confirmCancel, setConfirmCancel] = useState(false)
+  const load = useCallback(() => {
+    request<BillingState>('/api/billing')
+      .then(setB)
+      .catch((e) => toast(e instanceof Error ? e.message : 'Couldn’t load billing.'))
+  }, [])
+  useEffect(load, [load])
+  // back from checkout: the provider's webhook may land a moment later
+  useEffect(() => {
+    if (params.get('checkout') !== 'done') return
+    toast('Payment received — your plan updates in a moment')
+    const t = setTimeout(load, 4000)
+    return () => clearTimeout(t)
+  }, [params, load])
+
+  if (!b) return <p className="quiet-note">Loading…</p>
+  const go = async (path: string, json?: unknown) => {
+    setBusy(path)
+    try {
+      const { url } = await request<{ url: string }>(`/api/billing/${path}`, { method: 'POST', json: json ?? {} })
+      window.location.href = url
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Couldn’t reach billing.')
+      setBusy(null)
+    }
+  }
+  const price = (plan: PlanId) => b.prices.find((p) => p.plan === plan && p.interval === interval)
+  const u = b.usage
+  const paid = b.plan !== 'creator'
+
   return (
     <div className="stack">
-      <div className="banner" role="note">
-        <Icon name="card" />
-        <div>
-          <b>Billing isn’t connected yet.</b> Every workspace is on the free plan for now. The usage below is sample data.
+      {!b.provider && (
+        <div className="banner" role="note">
+          <Icon name="card" />
+          <div>
+            <b>Billing isn’t set up on this server.</b> Every workspace is on Creator until a payment provider is configured (STRIPE_SECRET_KEY or PAYSTACK_SECRET_KEY on the
+            backend).
+          </div>
         </div>
-      </div>
+      )}
+      {b.status === 'past_due' && (
+        <div className="banner is-bad" role="alert">
+          <Icon name="alert" />
+          <div>
+            <b>The last payment didn’t go through.</b> Update your card within 7 days to keep {b.planName}.
+          </div>
+          {b.manageable && manage && (
+            <button type="button" className="btn btn-primary btn-sm" disabled={!!busy} onClick={() => go('portal')}>
+              Update card
+            </button>
+          )}
+        </div>
+      )}
+
       <Card
         title="Plan"
-        hint="Paid plans unlock once billing is connected."
         footer={
-          <Link href="/pricing" className="btn btn-ghost btn-sm">
-            Compare plans
-          </Link>
+          <div className="bill-foot">
+            <Link href="/pricing" className="btn btn-ghost btn-sm">
+              Compare plans
+            </Link>
+            {paid && b.manageable && manage && (
+              <>
+                <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => go('portal')}>
+                  {busy === 'portal' ? 'Opening…' : 'Manage billing'}
+                </button>
+                {!b.cancelAtPeriodEnd && (
+                  <button type="button" className="btn btn-quiet btn-sm" onClick={() => setConfirmCancel(true)}>
+                    Cancel plan
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         }
       >
         <div className="plan-now">
-          <span className="plan-name">Free</span>
+          <div>
+            <span className="plan-name">{b.planName}</span>
+            <p className="access-note">{PLAN_BLURB[b.plan]}</p>
+          </div>
           <div className="plan-cost">
-            <strong>$0</strong>
-            <span>/ month</span>
+            {paid && b.interval ? (
+              <>
+                <strong>{(() => {
+                  const p = b.prices.find((x) => x.plan === b.plan && x.interval === b.interval)
+                  return p ? money(p.amount, p.currency) : '—'
+                })()}</strong>
+                <span>/ {b.interval}</span>
+              </>
+            ) : (
+              <>
+                <strong>$0</strong>
+                <span>/ month</span>
+              </>
+            )}
           </div>
         </div>
+        {paid && b.currentPeriodEnd && (
+          <p className="access-note bill-when">
+            {b.cancelAtPeriodEnd ? `Cancelled — ${b.planName} stays on until ${dateOf(b.currentPeriodEnd)}, then the workspace moves to Creator.` : `Renews on ${dateOf(b.currentPeriodEnd)}.`}
+          </p>
+        )}
       </Card>
-      <Card title="Usage this cycle" meta="Sample data">
+
+      {b.provider && (!paid || b.cancelAtPeriodEnd) && (
+        <Card
+          title={paid ? 'Choose a plan' : 'Upgrade'}
+          meta={b.provider === 'stripe' ? 'Card payments by Stripe' : 'Card and bank payments by Paystack'}
+          action={
+            <div className="seg seg-sm" role="group" aria-label="Billing period">
+              {(['month', 'year'] as const).map((iv) => (
+                <button key={iv} type="button" aria-pressed={interval === iv} className={interval === iv ? 'is-on' : ''} onClick={() => setInterval_(iv)}>
+                  {iv === 'month' ? 'Monthly' : 'Yearly'}
+                </button>
+              ))}
+            </div>
+          }
+        >
+          <div className="bill-plans">
+            {(['pro', 'studio'] as const).map((plan) => {
+              const p = price(plan)
+              return (
+                <div key={plan} className={`bill-plan ${plan === 'pro' ? 'is-featured' : ''}`}>
+                  <b>{plan === 'pro' ? 'Pro' : 'Studio'}</b>
+                  <div className="plan-cost">
+                    <strong>{p ? money(p.amount, p.currency) : '—'}</strong>
+                    <span>/ {interval}</span>
+                  </div>
+                  <p className="access-note">{PLAN_BLURB[plan]}</p>
+                  <button type="button" className={`btn btn-sm ${plan === 'pro' ? 'btn-primary' : 'btn-ghost'}`} disabled={!manage || !p || !!busy} onClick={() => go('checkout', { plan, interval })}>
+                    {busy === 'checkout' ? 'Opening checkout…' : `Choose ${plan === 'pro' ? 'Pro' : 'Studio'}`}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+          {!manage && <p className="access-note">Only owners and admins can change the plan.</p>}
+        </Card>
+      )}
+
+      <Card title="Usage this period" meta={`${dateOf(u.periodStart)} – ${dateOf(new Date(new Date(u.periodEnd).getTime() - 86400000).toISOString())}`}>
         <ul className="usage-grid">
-          {rows.map((r) => (
-            <li key={r.label}>
-              <div className="usage-row">
-                <span>{r.label}</span>
-                <b>
-                  {r.used.toLocaleString('en-US')} / {r.limit.toLocaleString('en-US')} {r.unit}
-                </b>
-              </div>
-              <Meter value={r.used} max={r.limit} />
-            </li>
-          ))}
+          <li>
+            <div className="usage-row">
+              <span>Storage</span>
+              <b>
+                {bytes(u.storageBytes)} / {bytes(u.storageLimit)}
+                {b.plan === 'studio' ? ' included' : ''}
+              </b>
+            </div>
+            <Meter value={u.storageBytes} max={u.storageLimit} tone={u.storageBytes > u.storageLimit * 0.9 ? 'warn' : undefined} />
+            {u.storageOverage > 0 && <small className="access-note">{bytes(u.storageOverage)} over the included storage, billed as you go.</small>}
+          </li>
+          <li>
+            <div className="usage-row">
+              <span>Processing minutes</span>
+              <b>
+                {Math.round(u.minutes).toLocaleString('en-US')} / {u.minutesLimit === null ? 'Unlimited' : u.minutesLimit.toLocaleString('en-US')}
+              </b>
+            </div>
+            <Meter value={u.minutes} max={u.minutesLimit ?? Math.max(u.minutes, 1) * 4} tone={u.minutesLimit !== null && u.minutes >= u.minutesLimit * 0.9 ? 'warn' : undefined} />
+          </li>
         </ul>
+        <p className="access-note bill-when">Minutes count the length of each video and audio file processed this period. Delivery, the player and the API are included on every plan.</p>
       </Card>
+
+      {confirmCancel && (
+        <div className="dialog-scrim" onPointerDown={(e) => e.target === e.currentTarget && setConfirmCancel(false)}>
+          <div className="dialog" role="alertdialog" aria-modal="true" aria-labelledby="cancel-title">
+            <h2 id="cancel-title">Cancel {b.planName}?</h2>
+            <p>
+              Nothing changes until {b.currentPeriodEnd ? dateOf(b.currentPeriodEnd) : 'the end of the period'}. After that the workspace moves to Creator: uploads stop once
+              storage is over 100 GB, and new videos encode up to 1080p.
+            </p>
+            <div className="dialog-foot">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmCancel(false)} autoFocus>
+                Keep {b.planName}
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger btn-sm"
+                disabled={!!busy}
+                onClick={async () => {
+                  setBusy('cancel')
+                  try {
+                    setB(await request<BillingState>('/api/billing/cancel', { method: 'POST', json: {} }))
+                    toast(`Cancelled — ${b.planName} stays on until the period ends`)
+                  } catch (e) {
+                    toast(e instanceof Error ? e.message : 'Couldn’t cancel.')
+                  } finally {
+                    setBusy(null)
+                    setConfirmCancel(false)
+                  }
+                }}
+              >
+                Cancel plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -484,6 +660,7 @@ const SECTIONS: { value: Tab; label: string; icon: string }[] = [
   { value: 'team', label: 'Team', icon: 'users' },
   { value: 'metadata', label: 'Metadata', icon: 'list' },
   { value: 'moderation', label: 'Moderation', icon: 'check' },
+  { value: 'encoding', label: 'Encoding', icon: 'layers' },
   { value: 'account', label: 'Account', icon: 'settings' },
   { value: 'billing', label: 'Billing', icon: 'card' },
 ]
@@ -493,7 +670,7 @@ export default function Settings() {
   const router = useRouter()
   const { workspace } = useAccount()
   const raw = params.get('tab')
-  const tab: Tab = raw === 'team' || raw === 'billing' || raw === 'account' || raw === 'metadata' || raw === 'moderation' ? raw : 'general'
+  const tab: Tab = raw === 'team' || raw === 'billing' || raw === 'account' || raw === 'metadata' || raw === 'moderation' || raw === 'encoding' ? raw : 'general'
 
   return (
     <>
@@ -518,6 +695,7 @@ export default function Settings() {
           {tab === 'account' && <Account />}
           {tab === 'metadata' && <SettingsMetadata />}
           {tab === 'moderation' && <SettingsModeration />}
+          {tab === 'encoding' && <SettingsEncoding />}
           {tab === 'billing' && <Billing />}
         </div>
       </div>

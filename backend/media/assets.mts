@@ -41,9 +41,16 @@ export type AssetRow = {
   moderationNote: string | null
   moderatedBy: string | null
   moderatedAt: Date | null
+  playback: 'public' | 'signed'
+  upload: { uploadId: string; partSize: number; partCount: number } | null
+  playlists: Partial<Record<'hevc' | 'av1', string>>
+  captions?: { lang: string; label: string; source: 'auto' | 'upload'; status: 'queued' | 'processing' | 'ready' | 'failed'; error: string | null }[]
 }
 
-export const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 5 * 1024 ** 3) // 5 GiB: one S3 PUT
+/** the largest file anyone can upload; above SINGLE_PUT_BYTES it has to go in parts */
+export const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 50 * 1024 ** 3)
+/** one S3 PUT tops out at 5 GiB */
+export const SINGLE_PUT_BYTES = 5 * 1024 ** 3
 
 export const newAssetId = () => `ast_${randomBytes(9).toString('base64url').replace(/[-_]/g, '').slice(0, 12).toLowerCase()}`
 export const prefixOf = (a: Pick<AssetRow, 'organizationId' | 'id'>) => `${a.organizationId}/${a.id}`
@@ -76,12 +83,15 @@ export function toDTO(a: AssetRow): MediaAsset {
     thumbUrl: fileUrl(a, a.thumbKey),
     posterUrl: fileUrl(a, a.posterKey ?? a.thumbKey),
     playbackUrl: a.status === 'ready' ? fileUrl(a, a.playlistKey) : null,
+    playbackUrls: a.status === 'ready' ? Object.fromEntries(Object.entries(a.playlists ?? {}).map(([c, k]) => [c, fileUrl(a, k ?? null)])) : {},
     folderId: a.folderId ?? null,
     collectionIds: a.collectionIds ?? [],
     metadata: a.metadata ?? {},
     moderation: a.moderation ?? 'approved',
     moderationFlags: a.moderationFlags ?? [],
     moderationNote: a.moderationNote ?? null,
+    playback: a.playback ?? 'public',
+    captions: (a.captions ?? []).map((c) => ({ ...c, url: c.status === 'ready' ? `/api/media/${a.id}/captions/${c.lang}.vtt` : null })),
   }
 }
 
@@ -89,11 +99,14 @@ export function toDTO(a: AssetRow): MediaAsset {
 export function apiAsset(a: AssetRow): MediaAsset {
   const d = toDTO(a)
   const abs = (u: string | null) => (u ? `${baseURL}${u}` : null)
-  return { ...d, thumbUrl: abs(d.thumbUrl), posterUrl: abs(d.posterUrl), playbackUrl: abs(d.playbackUrl) }
+  const urls = Object.fromEntries(Object.entries(d.playbackUrls).map(([c, u]) => [c, abs(u ?? null)]))
+  return { ...d, thumbUrl: abs(d.thumbUrl), posterUrl: abs(d.posterUrl), playbackUrl: abs(d.playbackUrl), playbackUrls: urls, captions: d.captions.map((c) => ({ ...c, url: abs(c.url) })) }
 }
 
 const SELECT = `select a.*, u.name as "createdByName",
-    coalesce((select array_agg(ca."collectionId" order by ca."addedAt") from "collection_asset" ca where ca."assetId" = a.id), '{}') as "collectionIds"
+    coalesce((select array_agg(ca."collectionId" order by ca."addedAt") from "collection_asset" ca where ca."assetId" = a.id), '{}') as "collectionIds",
+    coalesce((select json_agg(json_build_object('lang', c.lang, 'label', c.label, 'source', c.source, 'status', c.status, 'error', c.error) order by c.source, c.label)
+      from "caption" c where c."assetId" = a.id), '[]') as "captions"
   from "asset" a left join "user" u on u.id = a."createdBy"`
 
 export async function listAssets(orgId: string): Promise<AssetRow[]> {

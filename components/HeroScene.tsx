@@ -68,12 +68,15 @@ function studioEnvironment(renderer: THREE.WebGLRenderer) {
   return rt
 }
 
+/** Shared with the hero tour (components/HeroReel.tsx): it flips `playing` and the scene spins the prism away and back. */
+export type ReelControl = { playing: boolean; changedAt: number; hover: boolean }
+
 /**
  * `frame`: centred in the landing-page viewfinder and turned by scroll.
  * `panel`: centred in its container (auth side panel).
  * `hero`: the older full-bleed layout beside the headline.
  */
-export default function HeroScene({ mode = 'hero' }: { mode?: 'hero' | 'panel' | 'frame' }) {
+export default function HeroScene({ mode = 'hero', control }: { mode?: 'hero' | 'panel' | 'frame'; control?: { current: ReelControl } }) {
   const ref = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -234,6 +237,7 @@ export default function HeroScene({ mode = 'hero' }: { mode?: 'hero' | 'panel' |
     const start = performance.now()
     let last = start
     let time = 0
+    let hoverT = 0
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame)
@@ -251,20 +255,27 @@ export default function HeroScene({ mode = 'hero' }: { mode?: 'hero' | 'panel' |
       rig.position.set(layout.x, layout.y + (mode === 'hero' ? scroll * 0.9 : 0), 0)
       rig.scale.setScalar(layout.scale)
 
-      // prism: a deliberate three-quarter view, a slow sway, the cursor tilts it, scroll turns it away
+      // the tour: pressing play spins the prism away (0 → 1); when it ends the prism spins back in
+      const c = control?.current
+      const k = c ? clamp01((now - c.changedAt) / (c.playing ? 700 : 1100)) : 1
+      const away = !c || reduce ? (c?.playing ? 1 : 0) : c.playing ? easeInOut(k) : 1 - easeOutCubic(k)
+      hoverT += ((c?.hover && !c.playing ? 1 : 0) - hoverT) * 0.08
+
+      // prism: a deliberate three-quarter view, a slow sway, the cursor tilts it (more on hover), scroll turns it away
       const sway = reduce ? 0 : Math.sin(time * 0.35) * 0.22
-      prismPivot.rotation.y = -0.55 + sway + pointer.x * 0.35 + (1 - introE) * 0.9 + scroll * 0.9
-      prismPivot.rotation.x = 0.12 + pointer.y * 0.22 - scroll * 0.35
+      const lean = 1 + hoverT * 0.7
+      prismPivot.rotation.y = -0.55 + sway + pointer.x * 0.35 * lean + (1 - introE) * 0.9 + scroll * 0.9 + away * Math.PI * 1.25
+      prismPivot.rotation.x = 0.12 + pointer.y * 0.22 * lean - scroll * 0.35
       prismPivot.rotation.z = -0.04
       prismPivot.position.y = (reduce ? 0 : Math.sin(time * 0.6) * 0.04) - (1 - introE) * 0.35
-      prismPivot.scale.setScalar(0.94 + introE * 0.06)
+      prismPivot.scale.setScalar(Math.max((0.94 + introE * 0.06 + hoverT * 0.05) * (1 - away), 0.0001))
 
       // ticks rise from the centre outward
       for (let i = 0; i < TICKS; i++) {
         const t = tickBase[i]
         const grow = easeOutCubic(clamp01(intro * 1.6 - Math.abs(t.x) / SPAN * 0.6))
         dummy.position.set(t.x, 0, 0)
-        dummy.scale.set(0.012, Math.max(t.h * grow, 0.0001), 1)
+        dummy.scale.set(0.012, Math.max(t.h * grow * (1 + hoverT * 0.3) * (1 - away), 0.0001), 1)
         dummy.updateMatrix()
         ticks.setMatrixAt(i, dummy.matrix)
       }
@@ -274,7 +285,7 @@ export default function HeroScene({ mode = 'hero' }: { mode?: 'hero' | 'panel' |
       const loop = reduce ? 0.5 : (time / 9) % 1
       const px = -SPAN * 0.92 + loop * SPAN * 1.84
       playhead.position.x = px
-      headMat.opacity = (1 - easeInOut(clamp01((Math.abs(px) / SPAN - 0.6) / 0.32))) * clamp01((intro - 0.5) * 2)
+      headMat.opacity = (1 - easeInOut(clamp01((Math.abs(px) / SPAN - 0.6) / 0.32))) * clamp01((intro - 0.5) * 2) * (1 - away)
 
       renderer.render(scene, camera)
     }
@@ -311,7 +322,7 @@ export default function HeroScene({ mode = 'hero' }: { mode?: 'hero' | 'panel' |
       envRT.dispose()
       renderer.dispose()
     }
-  }, [mode])
+  }, [mode, control])
 
   return <canvas ref={ref} className="hero-canvas" aria-hidden="true" />
 }

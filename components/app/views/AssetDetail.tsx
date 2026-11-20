@@ -8,15 +8,90 @@ import { bytes, duration as fmtDuration } from '@/lib/sample'
 import Icon from '../Icon'
 import MediaPlayer from '../MediaPlayer'
 import MetadataEditor from '../MetadataEditor'
+import CaptionsPanel from '../CaptionsPanel'
 import TransformBuilder from '../TransformBuilder'
 import { flatTree, useLibrary } from '../library'
 import { CollectDialog, TagInput } from '../library-ui/dialogs'
 import { Ago, dims, useMedia } from '../media'
-import { Card, ModerationBadge, StatusBadge, Tabs, TypeIcon, copyText, toast } from '../ui'
+import { Card, ModerationBadge, Segmented, StatusBadge, Tabs, TypeIcon, copyText, toast } from '../ui'
 import { canManage, useAccount } from '../account'
 import { request } from '../library'
 
-type Tab = 'renditions' | 'embed' | 'transform'
+type Tab = 'renditions' | 'embed' | 'transform' | 'captions'
+
+type SignedLink = { token: string; expiresAt: string; embedUrl: string; playbackUrl: string | null }
+const LINK_TTL = [
+  { value: '3600', label: '1 hour' },
+  { value: '86400', label: '24 hours' },
+  { value: '604800', label: '7 days' },
+  { value: '2592000', label: '30 days' },
+] as const
+
+/** Who can watch: anyone with the link, or only viewers holding a signed, expiring link. */
+function PlaybackAccess({ id, policy, onChange }: { id: string; policy: 'public' | 'signed'; onChange: (p: 'public' | 'signed') => void }) {
+  const [ttl, setTtl] = useState<string>('86400')
+  const [link, setLink] = useState<SignedLink | null>(null)
+  const [busy, setBusy] = useState(false)
+  const create = async () => {
+    setBusy(true)
+    try {
+      setLink(await request<SignedLink>(`/api/assets/${id}/playback-token`, { method: 'POST', json: { expiresIn: Number(ttl) } }))
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Couldn’t create the link.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Card title="Playback access" meta={policy === 'signed' ? 'Signed links only' : 'Anyone with the link'}>
+      <div className="access">
+        <Segmented
+          label="Who can watch"
+          value={policy}
+          onChange={(p) => (setLink(null), onChange(p))}
+          options={[
+            { value: 'public', label: 'Anyone with the link' },
+            { value: 'signed', label: 'Signed links only' },
+          ]}
+        />
+        <p className="access-note">
+          {policy === 'signed'
+            ? 'The plain share link, stream URL and embed stop working for viewers. Hand out signed links that expire instead; members of this workspace can always watch.'
+            : 'Anyone who has the share link, stream URL or embed can watch. Switch to signed links to make every link expire.'}
+        </p>
+        {policy === 'signed' && (
+          <>
+            <div className="copy-row">
+              <select className="select" value={ttl} onChange={(e) => setTtl(e.target.value)} aria-label="Link lifetime">
+                {LINK_TTL.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    Valid for {o.label}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={create}>
+                <Icon name="link" size={15} /> {busy ? 'Signing…' : 'Create signed link'}
+              </button>
+            </div>
+            {link && (
+              <>
+                <div className="copy-row">
+                  <code>{link.embedUrl}</code>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(link.embedUrl, 'Signed link copied')}>
+                    <Icon name="copy" size={15} /> Copy
+                  </button>
+                </div>
+                <p className="access-note">
+                  Expires <Ago iso={link.expiresAt} />. For your own player, use the stream URL with the same token. To sign links on your own server, see Developers → Playback signing.
+                </p>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </Card>
+  )
+}
 
 export default function AssetDetail({ id }: { id: string }) {
   const { get, loaded, remove, update, retry } = useMedia()
@@ -52,6 +127,17 @@ export default function AssetDetail({ id }: { id: string }) {
   const ready = a.status === 'ready'
   // share links only work once the asset is approved (moderation)
   const shareable = ready && a.moderation === 'approved'
+  const signed = a.playback === 'signed'
+  // signed assets get a fresh 24-hour link instead of the plain one
+  const copyShare = async () => {
+    if (!signed) return copyText(watch, 'Share link copied — anyone with it can watch')
+    try {
+      const l = await request<SignedLink>(`/api/assets/${a.id}/playback-token`, { method: 'POST', json: { expiresIn: 86400 } })
+      await copyText(l.embedUrl, 'Signed link copied — it works for 24 hours')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Couldn’t create the link.')
+    }
+  }
 
   return (
     <>
@@ -76,8 +162,8 @@ export default function AssetDetail({ id }: { id: string }) {
         </div>
         <div className="page-actions">
           {shareable && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(watch, 'Share link copied — anyone with it can watch')}>
-              <Icon name="link" size={15} /> Copy share link
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => void copyShare()}>
+              <Icon name="link" size={15} /> {signed ? 'Copy 24-hour link' : 'Copy share link'}
             </button>
           )}
           {shareable && (
@@ -191,6 +277,7 @@ export default function AssetDetail({ id }: { id: string }) {
                 tabs={[
                   { value: 'renditions', label: 'Renditions', count: a.renditions.length },
                   ...(ready && a.type !== 'image' ? [{ value: 'embed' as Tab, label: 'Embed' }] : []),
+                  ...(ready && a.type !== 'image' ? [{ value: 'captions' as Tab, label: 'Captions', count: a.captions.filter((c) => c.status === 'ready').length || undefined }] : []),
                   ...(ready && a.type !== 'audio' ? [{ value: 'transform' as Tab, label: 'Transform' }] : []),
                 ]}
               />
@@ -226,9 +313,12 @@ export default function AssetDetail({ id }: { id: string }) {
 
               {tab === 'transform' && <TransformBuilder asset={a} />}
 
+              {tab === 'captions' && <CaptionsPanel asset={a} />}
+
               {tab === 'embed' && (
                 <div className="stack">
-                  <Card title="Share link" meta="Anyone with the link can watch">
+                  <PlaybackAccess id={a.id} policy={a.playback} onChange={(playback) => void update(a.id, { playback })} />
+                  <Card title="Share link" meta={signed ? 'Members only — viewers need a signed link' : 'Anyone with the link can watch'}>
                     <div className="copy-row">
                       <code>{watch}</code>
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(watch, 'Share link copied')}>
@@ -293,11 +383,21 @@ export default function AssetDetail({ id }: { id: string }) {
                   {bytes(a.size)} original{a.outputSize ? ` + ${bytes(a.outputSize)} outputs` : ''}
                 </dd>
               </div>
+              {ready && a.type !== 'image' && (
+                <div>
+                  <dt>Audience</dt>
+                  <dd>
+                    <Link href={`/dashboard/analytics?asset=${a.id}`}>Views, retention and quality</Link>
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt>Access</dt>
                 <dd>
                   {a.moderation === 'approved'
-                    ? 'Anyone with the link can watch · original is members-only'
+                    ? signed
+                      ? 'Signed links only · original is members-only'
+                      : 'Anyone with the link can watch · original is members-only'
                     : a.moderation === 'pending'
                       ? 'Members only until it’s approved'
                       : 'Members only — rejected in review'}

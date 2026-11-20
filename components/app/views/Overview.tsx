@@ -3,7 +3,8 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { STAGES, isActive, type MediaAsset } from '@/lib/media/types'
-import { COUNTRIES, bytes, compact, metric, type Range } from '@/lib/sample'
+import { bytes, compact, type Range } from '@/lib/sample'
+import { countryName, useAnalytics } from './Analytics'
 import { useAccount } from '../account'
 import { Ago, useMedia } from '../media'
 import { BarList, LineChart, ViewToggle } from '../charts'
@@ -27,11 +28,11 @@ export default function Overview() {
   const { user } = useAccount()
   const [range, setRange] = useState<Range>('30d')
   const [table, setTable] = useState(false)
-  const views = metric(11, range, 21000, { trend: 0.006 })
-  const watch = metric(12, range, 1400, { trend: 0.004 })
-  const start = metric(13, range, 38, { trend: -0.001, noise: 0.06, weekly: 0.02 })
-  const bandwidth = metric(14, range, 640, { trend: 0.005 })
-  const avgStart = Math.round(start.total / start.points.length)
+  const { data } = useAnalytics(range)
+  const t = data?.totals
+  const c = data?.change
+  const daily = data?.daily ?? []
+  const day = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
   const { assets } = useMedia()
   const queue = assets.filter(isActive).slice(0, 5)
   const recent = assets.slice(0, 6)
@@ -50,13 +51,13 @@ export default function Overview() {
       </PageHead>
 
       <p className="section-note">
-        <span className="overline">Audience</span> Sample data until view tracking is connected
+        <span className="overline">Audience</span> Views through share links and embeds
       </p>
       <div className="grid-ruled stat-tiles">
-        <StatTile label="Views" value={compact(views.total)} delta={views.delta} points={views.points} period={PERIOD[range]} />
-        <StatTile label="Watch time" value={compact(watch.total)} unit="hrs" delta={watch.delta} points={watch.points} period={PERIOD[range]} />
-        <StatTile label="Avg. time to first frame" value={String(avgStart)} unit="ms" delta={start.delta} upIsGood={false} points={start.points} period={PERIOD[range]} />
-        <StatTile label="Bandwidth delivered" value={(bandwidth.total / 1000).toFixed(1)} unit="TB" delta={bandwidth.delta} points={bandwidth.points} period={PERIOD[range]} />
+        <StatTile label="Views" value={t ? compact(t.views) : '—'} delta={c?.views ?? undefined} points={daily.map((d) => ({ label: d.date, value: d.views }))} period={PERIOD[range]} />
+        <StatTile label="Watch time" value={t ? (t.watchHours >= 100 ? compact(Math.round(t.watchHours)) : t.watchHours.toFixed(1)) : '—'} unit="hrs" delta={c?.watchHours ?? undefined} points={daily.map((d) => ({ label: d.date, value: d.watchHours }))} period={PERIOD[range]} />
+        <StatTile label="Avg. time to first frame" value={t?.avgStartupMs != null ? t.avgStartupMs.toLocaleString('en-US') : '—'} unit="ms" delta={c?.avgStartupMs ?? undefined} upIsGood={false} period={PERIOD[range]} />
+        <StatTile label="Streamed" value={t ? bytes(t.bytesDelivered) : '—'} delta={c?.bytesDelivered ?? undefined} period={PERIOD[range]} />
       </div>
 
       <div className="grid-2">
@@ -121,14 +122,27 @@ export default function Overview() {
             )}
           </Card>
 
-          <Card title="Views" meta={`Sample data · last ${PERIOD[range]}`} action={<ViewToggle table={table} onChange={setTable} />}>
+          <Card
+            title="Views"
+            meta={`Last ${PERIOD[range]}`}
+            action={
+              <>
+                <Link href="/dashboard/analytics" className="panel-link">
+                  Analytics <Icon name="arrowRight" size={14} />
+                </Link>
+                <ViewToggle table={table} onChange={setTable} />
+              </>
+            }
+          >
             <div className="figure">
-              <strong>{views.total.toLocaleString('en-US')}</strong>
-              <span className={views.delta >= 0 ? 'is-good' : 'is-bad'}>
-                {views.delta >= 0 ? '↑' : '↓'} {Math.abs(views.delta * 100).toFixed(1)}% vs previous {PERIOD[range]}
-              </span>
+              <strong>{t ? t.views.toLocaleString('en-US') : '—'}</strong>
+              {c?.views != null && (
+                <span className={c.views >= 0 ? 'is-good' : 'is-bad'}>
+                  {c.views >= 0 ? '↑' : '↓'} {Math.abs(c.views * 100).toFixed(1)}% vs previous {PERIOD[range]}
+                </span>
+              )}
             </div>
-            <LineChart points={views.points} label={`Daily views, last ${PERIOD[range]} (sample data)`} table={table} yHead="Views" />
+            <LineChart points={daily.map((d) => ({ label: day(d.date), value: d.views }))} label={`Daily views, last ${PERIOD[range]}`} table={table} yHead="Views" />
           </Card>
         </div>
 
@@ -197,8 +211,12 @@ export default function Overview() {
             )}
           </Card>
 
-          <Card title="Top countries" meta={`Sample data · last ${PERIOD[range]}`}>
-            <BarList points={COUNTRIES.slice(0, 5)} format={compact} />
+          <Card title="Top countries" meta={`Views · last ${PERIOD[range]}`}>
+            {data?.countries.length ? (
+              <BarList points={data.countries.slice(0, 5).map((r) => ({ label: countryName(r.country), value: r.views }))} format={compact} />
+            ) : (
+              <p className="quiet-note">No views yet. Share a link or embed a player to see where your audience is.</p>
+            )}
           </Card>
         </div>
       </div>

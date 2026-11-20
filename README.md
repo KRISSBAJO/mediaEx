@@ -3,8 +3,8 @@
 The media cloud for creators and studios: a Next.js 16 (App Router) landing page with a Three.js hero, sign-in, and a
 workspace dashboard, with a separate Node.js API. Accounts, workspaces and teams are real (Better Auth + Postgres), and
 so is the media core: uploads, an FFmpeg pipeline that encodes video and audio to adaptive HLS, a library, playback and
-share/embed links. Analytics, API keys, webhooks and billing in the dashboard are still generated sample data
-(`lib/sample.ts`) and are labelled so.
+share/embed links, with resumable uploads, HEVC/AV1, captions, signed playback, view analytics, API keys, webhooks
+and Stripe or Paystack billing.
 
 ## Run it locally
 
@@ -53,13 +53,18 @@ The API image ships Node.js, the PostgreSQL-backed account service and the media
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | Optional GitHub sign-in |
 | `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | **Durable media storage** in an S3-compatible bucket (Cloudflare R2, AWS S3, MinIO). Required for uploads in production unless `MEDIA_DIR` points at a mounted volume. |
 | `MEDIA_DIR` | Local-disk storage directory. Only durable if it is a persistent volume. |
-| `MAX_UPLOAD_BYTES` | Largest upload accepted (default 5 GiB) |
+| `MAX_UPLOAD_BYTES` | Largest upload accepted (default 50 GiB; anything over 5 GiB goes up in parts) |
 | `FFMPEG_PATH`, `FFPROBE_PATH` | Only if FFmpeg isn't on the PATH |
 | `MEDIA_WORKER` | `off` runs an API-only instance that doesn't encode |
 | `MAX_VARIANTS_PER_ASSET` | Cached transformation variants kept per asset (default 200) |
 | `ANTHROPIC_API_KEY` | Optional. Lets workspaces turn on automatic image review in moderation (Claude looks at images and video frames) |
 | `API_RATE_LIMIT_PER_MINUTE` | Requests per minute allowed for each API key on `/api/v1` (default 120) |
 | `PUBLIC_API_URL` | Optional. The origin API callers use, if it differs from `BETTER_AUTH_URL` (used in upload URLs handed to key callers) |
+| `MEDIA_HW_ENCODER` | Optional. `nvenc` (NVIDIA) or `qsv` (Intel Quick Sync) to encode on the GPU. Needs an FFmpeg build with those encoders (the default image's Alpine FFmpeg has neither); anything the GPU can't do falls back to the CPU |
+| `OPENAI_API_KEY` | Optional. Turns on automatic captions (OpenAI Whisper). `OPENAI_TRANSCRIBE_MODEL` (default `whisper-1`) and `OPENAI_BASE_URL` change the model and endpoint |
+| `BILLING_PROVIDER` | `stripe` or `paystack`. Without it, whichever of the two has a key is used; with neither, every workspace stays on Creator |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Stripe billing. Point a webhook at `<BETTER_AUTH_URL>/api/billing/webhook/stripe` for `checkout.session.completed`, `customer.subscription.*` and `invoice.payment_failed`, and turn on the Customer Portal |
+| `PAYSTACK_SECRET_KEY`, `PAYSTACK_CURRENCY`, `PAYSTACK_PRICES` | Paystack billing. Webhook URL `<BETTER_AUTH_URL>/api/billing/webhook/paystack`. `PAYSTACK_CURRENCY` defaults to NGN; for anything but USD set `PAYSTACK_PRICES="pro_month=…,pro_year=…,studio_month=…,studio_year=…"` in that currency's main unit |
 
 Generate each secret separately with `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. Store production values in service secrets. Register OAuth callbacks at `<BETTER_AUTH_URL>/api/auth/callback/google` or `<BETTER_AUTH_URL>/api/auth/callback/github`.
 
@@ -88,17 +93,39 @@ The frontend only renders and forwards; everything that touches files or the dat
 1. **Upload.** The dashboard asks `POST /api/uploads` for a slot; the backend creates the asset (status `uploading`) and
    returns where to `PUT` the file: a presigned bucket URL, or (local disk) `/api/uploads/:id`, which streams through
    the frontend to the backend. `POST /api/uploads/:id/complete` checks the size and queues the asset.
+   Files from 64 MB (and anything over 5 GiB, from any caller) go up **in parts**: 16 MiB or larger, four at a time,
+   each retried on its own with backoff. `GET /api/uploads/:id/parts` says which have arrived, so the dashboard picks an
+   interrupted upload up again when the same file is added; `complete` joins them (S3 multipart upload, or local part
+   files). The server lists the parts itself, so buckets don't need to expose `ETag` to the browser.
 2. **Pipeline.** `backend/media/worker.mts` runs inside the backend process. It claims queued assets from Postgres
    (`for update skip locked`, so several instances can share the queue) and runs FFmpeg:
    - *Analyse*: ffprobe for type, codec, size, duration; a thumbnail frame (or a waveform for audio).
-   - *Encode*: video → H.264/AAC HLS ladder at 1080p, 720p, 480p, 360p (never above the source); audio → AAC HLS;
-     images → a 2560 px poster.
+   - *Encode*: video → H.264/AAC HLS ladder up to the plan's ceiling (1080p on Creator, 4K on Pro, 8K on Studio), never
+     above the source; audio → AAC HLS; images → a 2560 px poster. Workspaces on Pro and Studio can add **HEVC and AV1**
+     ladders (Settings → Encoding, `backend/media/encoding.mts`), packaged as fMP4 HLS under `hls/hevc/` and `hls/av1/`;
+     the player picks the smallest one the device decodes and falls back to H.264. `MEDIA_HW_ENCODER` moves encoding
+     to the GPU, with a CPU retry if the GPU fails.
    - *Package*: master playlist, sizes, and publishing to the bucket.
    Progress is written to the asset row; the dashboard polls `/api/assets` while anything is in flight.
    Jobs interrupted by a restart are picked up again after two minutes, up to three attempts.
 3. **Playback.** `/api/media/:id/…` serves playlists, thumbnails and posters to anyone with the link (asset IDs are
    random), so share links (`/embed/:id`) and iframes work; with a bucket, playlists list signed segment URLs
    (valid 6 hours) that players fetch straight from the bucket. The original is a members-only download.
+   An asset set to **signed links only** needs a playback token (`?token=<expiry>.<HMAC-SHA256 of "assetId:expiry">`)
+   for everything a viewer loads; playlists pass the token on to every segment. Tokens come from
+   `POST /api/assets/:id/playback-token`, `POST /api/v1/assets/:id/playback-token`, or the customer's own server using
+   the workspace secret (Developers → Playback signing). See `backend/media/playback.mts`.
+4. **Captions.** WebVTT tracks per language: uploaded (VTT or SRT), or transcribed by OpenAI Whisper when
+   `OPENAI_API_KEY` is set (per asset, or for every new upload with Settings → Encoding → Captions). The player shows a
+   CC button; `asset.captions_ready` fires when a transcription finishes. See `backend/media/captions.mts`.
+5. **Analytics.** The share/embed player sends a heartbeat every 15 seconds and when playback stops (watch time, the
+   furthest point reached, time to first frame, stalls, bytes). Country comes from a CDN header when there is one,
+   otherwise from the viewer's time zone. Dashboard previews and other players aren't counted. `GET /api/analytics`
+   and `GET /api/v1/analytics`; see `backend/media/analytics.mts`.
+6. **Billing.** Plans and their limits live in `backend/media/billing.mts`: storage is checked when an upload starts,
+   processing minutes when it's queued, and the plan sets the ladder's ceiling and whether HEVC/AV1 are allowed.
+   Stripe (Checkout + Customer Portal) or Paystack (plans created on first use) take payment; signed webhooks keep the
+   `subscription` table current, and each event is handled once.
 
 The frontend forwards `/api/assets`, `/api/uploads` and `/api/media` to the backend unchanged (`proxyMedia` in
 `lib/backend.ts`), streaming in both directions.
@@ -158,8 +185,8 @@ transformations return 404 to anyone outside the workspace; members can always s
 what's waiting (flagged first) with approve and reject (with a note). API: `/api/moderation/*`. Assets that existed
 before moderation was turned on stay approved.
 
-Known limits: one `PUT` per upload (no resumable/multipart yet, so 5 GB max); encoding is CPU-only H.264; captions,
-view analytics and signed playback URLs are not built yet.
+Known limits: HDR sources are encoded as SDR; captions aren't translated into other languages; Studio storage past
+10 TB is reported but not yet charged automatically.
 
 ## Developer platform
 
@@ -240,7 +267,8 @@ The code is in `backend/media/webhooks.mts` (endpoints, signing, dispatcher, `em
 - `backend/media/types.mts` — media types shared by both services (the frontend imports them through `lib/media/types.ts`)
 - `backend/media/transform.mts`, `fields.mts`, `moderation.mts` — transformations, custom metadata, moderation
 - `backend/media/keys.mts`, `v1.mts`, `webhooks.mts` — API keys, the public API and webhooks
-- `lib/sample.ts` — sample analytics and billing data (still to be replaced)
+- `backend/media/playback.mts`, `analytics.mts`, `encoding.mts`, `captions.mts`, `billing.mts` — signed playback, view analytics, codecs and GPU encoding, captions, plans and billing
+- `lib/sample.ts` — formatting helpers (bytes, durations, compact numbers) and leftover sample data
 - `app/globals.css`, `app/dashboard/dashboard.css` — design tokens and styles
 
 Motion respects `prefers-reduced-motion`.

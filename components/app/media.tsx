@@ -17,6 +17,10 @@ export type Transfer = {
   state: 'waiting' | 'uploading' | 'done' | 'error' | 'cancelled'
   error?: string
   folderId: string | null
+  /** sent in parts: survives dropped connections, and can be resumed by adding the same file again */
+  resumable?: boolean
+  /** picked up where an earlier, interrupted upload stopped */
+  resumed?: boolean
 }
 
 type Media = {
@@ -27,7 +31,7 @@ type Media = {
   /** replace or add one asset locally (after a PATCH, say) */
   put: (a: MediaAsset) => void
   remove: (id: string) => Promise<boolean>
-  update: (id: string, patch: { title?: string; tags?: string[]; folderId?: string | null; metadata?: Record<string, unknown> }) => Promise<boolean>
+  update: (id: string, patch: { title?: string; tags?: string[]; folderId?: string | null; metadata?: Record<string, unknown>; playback?: 'public' | 'signed' }) => Promise<boolean>
   retry: (id: string) => Promise<boolean>
   transfers: Transfer[]
   upload: (files: FileList | File[], folderId?: string | null) => void
@@ -50,13 +54,63 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 const PARALLEL = 2
+/** files from this size go up in parts */
+const MULTIPART_FROM = 64 * 1024 ** 2
+const PART_PARALLEL = 4
+const PART_TRIES = 6
+
+type Target = { url: string; method: string; headers: Record<string, string> }
+type SingleUpload = Target & { kind?: 'single' }
+type MultipartUpload = { kind: 'multipart'; partSize: number; partCount: number; parts: string }
+
+/* where interrupted multipart uploads can be picked up again: file fingerprint → asset */
+const RESUME_KEY = 'mx-resume'
+const fingerprint = (f: File) => `${f.name}:${f.size}:${f.lastModified}`
+function readResumes(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(RESUME_KEY) || '{}')
+  } catch {
+    return {}
+  }
+}
+function writeResume(fp: string, assetId: string | null) {
+  try {
+    const all = readResumes()
+    if (assetId) all[fp] = assetId
+    else delete all[fp]
+    localStorage.setItem(RESUME_KEY, JSON.stringify(all))
+  } catch {
+    /* private mode: resuming just won't be offered */
+  }
+}
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/** PUT a blob with progress. Rejects with Error('CANCELLED') when aborted. */
+function putBlob(t: Target, blob: Blob, type: string, onProgress: (n: number) => void, track: (x: XMLHttpRequest | null) => void) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    track(xhr)
+    xhr.open(t.method, t.url)
+    for (const [k, v] of Object.entries(t.headers)) xhr.setRequestHeader(k, v)
+    if (type) xhr.setRequestHeader('Content-Type', type)
+    xhr.upload.onprogress = (e) => onProgress(e.loaded)
+    const done = () => track(null)
+    xhr.onload = () => (done(), xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(Object.assign(new Error(safeError(xhr.responseText) || `Upload failed (${xhr.status})`), { status: xhr.status })))
+    xhr.onerror = () => (done(), reject(new Error('The connection dropped during the upload.')))
+    xhr.onabort = () => (done(), reject(new Error('CANCELLED')))
+    xhr.send(blob)
+  })
+}
 
 export function MediaProvider({ initial, children }: { initial: MediaAsset[]; children: React.ReactNode }) {
   const [assets, setAssets] = useState(initial)
   const [loaded, setLoaded] = useState(true)
   const [transfers, setTransfers] = useState<Transfer[]>([])
   const files = useRef(new Map<string, File>())
-  const xhrs = useRef(new Map<string, XMLHttpRequest>())
+  // every request in flight per transfer, so cancelling stops all of a multipart upload's parts
+  const xhrs = useRef(new Map<string, Set<XMLHttpRequest>>())
+  const cancelled = useRef(new Set<string>())
   const started = useRef(new Set<string>())
   // the latest transfer list, for callbacks that run after an await
   const transfersRef = useRef(transfers)
@@ -101,7 +155,7 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
   }, [])
 
   const update = useCallback(
-    async (id: string, patch: { title?: string; tags?: string[]; folderId?: string | null; metadata?: Record<string, unknown> }) => {
+    async (id: string, patch: { title?: string; tags?: string[]; folderId?: string | null; metadata?: Record<string, unknown>; playback?: 'public' | 'signed' }) => {
       try {
         const { asset } = await json<{ asset: MediaAsset }>(await fetch(`/api/assets/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }))
         put(asset)
@@ -131,44 +185,137 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
   /* ------------------------------------------------ uploads */
   const patchT = (key: string, p: Partial<Transfer>) => setTransfers((ts) => ts.map((t) => (t.key === key ? { ...t, ...p } : t)))
 
+  const track = (key: string) => {
+    let current: XMLHttpRequest | null = null
+    return (x: XMLHttpRequest | null) => {
+      const set = xhrs.current.get(key) ?? new Set()
+      xhrs.current.set(key, set)
+      if (x) set.add((current = x))
+      else if (current) set.delete(current)
+    }
+  }
+
+  /** sends a file's parts (skipping the ones already there), retrying each one, a few at a time */
+  const sendParts = async (key: string, file: File, assetId: string, plan: MultipartUpload, have: Set<number>) => {
+    const sizeOf = (n: number) => (n < plan.partCount ? plan.partSize : file.size - plan.partSize * (plan.partCount - 1))
+    let done = [...have].reduce((t, n) => t + sizeOf(n), 0)
+    const inFlight = new Map<number, number>()
+    const report = () => patchT(key, { loaded: done + [...inFlight.values()].reduce((t, n) => t + n, 0) })
+    report()
+    const todo = Array.from({ length: plan.partCount }, (_, i) => i + 1).filter((n) => !have.has(n))
+    const targets = new Map<number, Target>()
+    const fetchTargets = async (numbers: number[]) => {
+      const { parts } = await json<{ parts: (Target & { number: number })[] }>(
+        await fetch(plan.parts, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ numbers }) }),
+      )
+      for (const t of parts) targets.set(t.number, t)
+    }
+    let stop = false // one part gave up: the others stop too
+    const one = async (n: number) => {
+      for (let attempt = 1; ; attempt++) {
+        if (cancelled.current.has(key) || stop) throw new Error('CANCELLED')
+        try {
+          if (!targets.has(n)) await fetchTargets(todo.filter((x) => !targets.has(x) && x >= n).slice(0, 50))
+          const start = (n - 1) * plan.partSize
+          await putBlob(targets.get(n)!, file.slice(start, start + sizeOf(n)), '', (l) => (inFlight.set(n, l), report()), track(key))
+          inFlight.delete(n)
+          done += sizeOf(n)
+          report()
+          return
+        } catch (e) {
+          inFlight.delete(n)
+          if (e instanceof Error && e.message === 'CANCELLED') throw e
+          if (attempt >= PART_TRIES) throw e
+          targets.delete(n) // a signed URL may have expired: ask for a fresh one
+          // offline: wait for the connection to come back before trying again
+          if (typeof navigator !== 'undefined' && !navigator.onLine) await new Promise((r) => window.addEventListener('online', r, { once: true }))
+          await wait(Math.min(15000, 1000 * 2 ** (attempt - 1)))
+        }
+      }
+    }
+    const queue = [...todo]
+    try {
+      await Promise.all(
+        Array.from({ length: Math.min(PART_PARALLEL, queue.length) }, async () => {
+          for (let n = queue.shift(); n !== undefined; n = queue.shift()) await one(n)
+        }),
+      )
+    } catch (e) {
+      stop = true
+      xhrs.current.get(key)?.forEach((x) => x.abort())
+      throw e
+    }
+  }
+
   const send = useCallback(
     async (t: Transfer) => {
       const file = files.current.get(t.key)
       if (!file || started.current.has(t.key)) return
       started.current.add(t.key)
       patchT(t.key, { state: 'uploading', loaded: 0 })
+      const fp = fingerprint(file)
+      const big = file.size >= MULTIPART_FROM
+      let assetId: string | null = null
+      let multipart = false
       try {
-        const { asset, upload } = await json<{ asset: MediaAsset; upload: { url: string; method: string; headers: Record<string, string> } }>(
-          await fetch('/api/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: file.name, size: file.size, mimeType: file.type || null, folderId: t.folderId }) }),
-        )
-        patchT(t.key, { assetId: asset.id })
-        put(asset)
+        // an earlier upload of this same file that stopped part-way: carry on from where it got to
+        const earlier = big ? readResumes()[fp] : undefined
+        let resumed: { plan: MultipartUpload; have: Set<number> } | null = null
+        if (earlier) {
+          const res = await fetch(`/api/uploads/${earlier}/parts`, { cache: 'no-store' })
+          if (res.ok) {
+            const r = (await res.json()) as { partSize: number; partCount: number; uploaded: { number: number }[] }
+            resumed = { plan: { kind: 'multipart', partSize: r.partSize, partCount: r.partCount, parts: `/api/uploads/${earlier}/parts` }, have: new Set(r.uploaded.map((p) => p.number)) }
+            assetId = earlier
+            patchT(t.key, { assetId, resumable: true, resumed: true })
+          } else writeResume(fp, null)
+        }
 
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest()
-          xhrs.current.set(t.key, xhr)
-          xhr.open(upload.method, upload.url)
-          for (const [k, v] of Object.entries(upload.headers)) xhr.setRequestHeader(k, v)
-          if (file.type) xhr.setRequestHeader('Content-Type', file.type)
-          xhr.upload.onprogress = (e) => patchT(t.key, { loaded: e.loaded })
-          xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(safeError(xhr.responseText) || `Upload failed (${xhr.status})`)))
-          xhr.onerror = () => reject(new Error('The connection dropped during the upload.'))
-          xhr.onabort = () => reject(new Error('CANCELLED'))
-          xhr.send(file)
-        })
-        xhrs.current.delete(t.key)
+        if (resumed) {
+          multipart = true
+          await sendParts(t.key, file, assetId!, resumed.plan, resumed.have)
+        } else {
+          const { asset, upload } = await json<{ asset: MediaAsset; upload: SingleUpload | MultipartUpload }>(
+            await fetch('/api/uploads', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fileName: file.name, size: file.size, mimeType: file.type || null, folderId: t.folderId, multipart: big }),
+            }),
+          )
+          assetId = asset.id
+          put(asset)
+          if (upload.kind === 'multipart') {
+            multipart = true
+            writeResume(fp, asset.id)
+            patchT(t.key, { assetId, resumable: true })
+            await sendParts(t.key, file, asset.id, upload, new Set())
+          } else {
+            patchT(t.key, { assetId })
+            await putBlob(upload, file, file.type, (l) => patchT(t.key, { loaded: l }), track(t.key))
+          }
+        }
 
-        const done = await json<{ asset: MediaAsset }>(await fetch(`/api/uploads/${asset.id}/complete`, { method: 'POST' }))
+        const done = await json<{ asset: MediaAsset }>(await fetch(`/api/uploads/${assetId}/complete`, { method: 'POST' }))
+        writeResume(fp, null)
         put(done.asset)
         patchT(t.key, { state: 'done', loaded: file.size })
       } catch (e) {
-        xhrs.current.delete(t.key)
-        const cancelled = e instanceof Error && e.message === 'CANCELLED'
-        patchT(t.key, { state: cancelled ? 'cancelled' : 'error', error: cancelled ? undefined : e instanceof Error ? e.message : 'Upload failed.' })
-        // don't leave a half-uploaded asset behind
-        const id = transfersRef.current.find((x) => x.key === t.key)?.assetId
-        if (id) void fetch(`/api/assets/${id}`, { method: 'DELETE' }).then(() => setAssets((xs) => xs.filter((x) => x.id !== id)))
+        const isCancel = e instanceof Error && e.message === 'CANCELLED'
+        if (isCancel || !multipart) {
+          patchT(t.key, { state: isCancel ? 'cancelled' : 'error', error: isCancel ? undefined : e instanceof Error ? e.message : 'Upload failed.' })
+          // don't leave a half-uploaded asset behind
+          writeResume(fp, null)
+          if (assetId) {
+            const id = assetId
+            void fetch(`/api/assets/${id}`, { method: 'DELETE' }).then(() => setAssets((xs) => xs.filter((x) => x.id !== id)))
+          }
+        } else {
+          // parts that arrived stay; adding the same file again picks up from here
+          patchT(t.key, { state: 'error', error: `${e instanceof Error ? e.message : 'Upload failed.'} What arrived is kept: add the same file again to resume.` })
+        }
       } finally {
+        xhrs.current.delete(t.key)
+        cancelled.current.delete(t.key)
         files.current.delete(t.key)
       }
     },
@@ -206,9 +353,11 @@ export function MediaProvider({ initial, children }: { initial: MediaAsset[]; ch
   }, [])
 
   const cancel = useCallback((key: string) => {
-    const xhr = xhrs.current.get(key)
-    if (xhr) xhr.abort()
-    else {
+    const running = xhrs.current.get(key)
+    if (started.current.has(key) && files.current.has(key)) {
+      cancelled.current.add(key)
+      running?.forEach((x) => x.abort())
+    } else {
       files.current.delete(key)
       setTransfers((ts) => ts.map((t) => (t.key === key && t.state === 'waiting' ? { ...t, state: 'cancelled' } : t)))
     }

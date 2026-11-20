@@ -4099,3 +4099,139 @@ button.asset-cell:hover b {
     flex-basis: 100%;
   }
 }
+
+/* ------------------------------------------------ playback access (asset page) */
+.access {
+  display: grid;
+  gap: 14px;
+}
+.access .seg {
+  justify-self: start;
+}
+.access-note {
+  max-width: 620px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.dev-sign-row {
+  margin: 14px 0;
+}
+
+/* ------------------------------------------------ settings: encoding */
+.codec-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+.codec-opt {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.codec-opt:has(input:checked) {
+  border-color: var(--line-2);
+  background: rgba(255, 255, 255, 0.02);
+}
+.codec-opt.is-off {
+  opacity: 0.55;
+  cursor: default;
+}
+.codec-opt input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+.codec-opt b {
+  display: block;
+  font-weight: 500;
+}
+.codec-opt small {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------ captions */
+.player-cc {
+  width: auto;
+  padding: 0 7px;
+  font: 600 11px/1 var(--font-body);
+  letter-spacing: 0.04em;
+}
+.player-cc.is-on {
+  background: rgba(255, 255, 255, 0.9);
+  color: #0a0a0a;
+}
+.player-media::cue {
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-family: var(--font-body);
+}
+.cc-badge {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 28px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  font: 500 11.5px/1 var(--font-code);
+  color: var(--muted);
+}
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.cc-empty {
+  padding: 18px 20px;
+}
+
+/* ------------------------------------------------ settings: billing */
+.bill-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.bill-when {
+  margin-top: 14px;
+}
+.bill-plans {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.bill-plan {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.bill-plan.is-featured {
+  border-color: var(--line-2);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.bill-plan > b {
+  font-size: 16px;
+  font-weight: 500;
+}
+.bill-plan .btn {
+  justify-self: start;
+}
+@media (max-width: 700px) {
+  .bill-plans {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.codec-opt small.codec-plan {
+  color: var(--accent);
+}

@@ -37,6 +37,8 @@ const assertKey = (key: string) => {
 }
 
 export type UploadTarget = { url: string; method: 'PUT'; headers: Record<string, string> }
+/** a part already stored for a multipart upload */
+export type StoredPart = { number: number; size: number; etag: string }
 
 export interface Storage {
   kind: 'local' | 's3'
@@ -52,12 +54,22 @@ export interface Storage {
   serve(key: string, req: Request, opts?: { download?: string }): Promise<Response>
   /** delete everything under a prefix */
   removePrefix(prefix: string): Promise<void>
+  /** delete one file (no error when it's already gone) */
+  remove(key: string): Promise<void>
   /** store a generated file (transformations) */
   putBuffer(key: string, data: Buffer, type: string): Promise<void>
   /** read a whole stored file into memory (small files only), or null when it doesn't exist */
   getBuffer(key: string): Promise<Buffer | null>
   /** something FFmpeg can open directly: a local path, or a short-lived signed URL it can range-request */
   readableUrl(key: string): Promise<string>
+
+  /* multipart uploads (large files, resumable): start, send parts, list what arrived, join them, or give up */
+  multipartStart(key: string): Promise<string>
+  /** where to PUT part `n` (1-based); local storage answers with the app's own upload route */
+  partTarget(key: string, uploadId: string, n: number, assetId: string): Promise<UploadTarget>
+  listParts(key: string, uploadId: string): Promise<StoredPart[]>
+  multipartComplete(key: string, uploadId: string, parts: StoredPart[]): Promise<void>
+  multipartAbort(key: string, uploadId: string): Promise<void>
 }
 
 async function* walk(dir: string): AsyncGenerator<string> {
@@ -163,6 +175,10 @@ class LocalStorage implements Storage {
     await rm(this.path(prefix), { recursive: true, force: true })
   }
 
+  async remove(key: string) {
+    await rm(this.path(key), { force: true })
+  }
+
   async putBuffer(key: string, data: Buffer) {
     const file = this.path(key)
     await mkdir(path.dirname(file), { recursive: true })
@@ -181,6 +197,83 @@ class LocalStorage implements Storage {
 
   async readableUrl(key: string) {
     return this.path(key)
+  }
+
+  /* multipart: parts are files next to the original (<original>.parts/00001), joined on completion */
+  private partsDir(key: string) {
+    return `${this.path(key)}.parts`
+  }
+
+  async multipartStart(key: string) {
+    await mkdir(this.partsDir(key), { recursive: true })
+    return 'local'
+  }
+
+  async partTarget(_key: string, _uploadId: string, n: number, assetId: string): Promise<UploadTarget> {
+    return { url: `/api/uploads/${assetId}/parts/${n}`, method: 'PUT', headers: {} }
+  }
+
+  /** used by the upload route: one part, refused unless it is exactly `expected` bytes */
+  async writePart(key: string, n: number, body: ReadableStream<Uint8Array>, expected: number) {
+    const dir = this.partsDir(key)
+    await mkdir(dir, { recursive: true })
+    const file = path.join(dir, String(n).padStart(5, '0'))
+    const tmp = `${file}.${process.pid}.${Date.now()}.part`
+    let size = 0
+    const counter = async function* (src: AsyncIterable<Uint8Array>) {
+      for await (const chunk of src) {
+        size += chunk.length
+        if (size > expected) throw new Error('UPLOAD_TOO_LARGE')
+        yield chunk
+      }
+    }
+    try {
+      await pipeline(Readable.fromWeb(body as never), counter, createWriteStream(tmp))
+      if (size !== expected) throw new Error('PART_SHORT')
+      await rename(tmp, file)
+      return size
+    } catch (e) {
+      await rm(tmp, { force: true })
+      throw e
+    }
+  }
+
+  async listParts(key: string) {
+    const dir = this.partsDir(key)
+    let names: string[]
+    try {
+      names = await readdir(dir)
+    } catch {
+      return []
+    }
+    const parts: StoredPart[] = []
+    for (const name of names) {
+      if (!/^\d{5}$/.test(name)) continue // skip half-written temp files
+      parts.push({ number: Number(name), size: (await stat(path.join(dir, name))).size, etag: name })
+    }
+    return parts.sort((a, b) => a.number - b.number)
+  }
+
+  async multipartComplete(key: string, _uploadId: string, parts: StoredPart[]) {
+    const file = this.path(key)
+    const tmp = `${file}.joining`
+    const out = createWriteStream(tmp)
+    try {
+      for (const p of parts) {
+        await pipeline(createReadStream(path.join(this.partsDir(key), String(p.number).padStart(5, '0'))), out, { end: false })
+      }
+      await new Promise<void>((resolve, reject) => out.end((e?: Error | null) => (e ? reject(e) : resolve())))
+      await rename(tmp, file)
+    } catch (e) {
+      out.destroy()
+      await rm(tmp, { force: true })
+      throw e
+    }
+    await rm(this.partsDir(key), { recursive: true, force: true })
+  }
+
+  async multipartAbort(key: string) {
+    await rm(this.partsDir(key), { recursive: true, force: true })
   }
 }
 
@@ -259,6 +352,9 @@ class S3Storage implements Storage {
       const lines = await Promise.all(
         (await res.text()).split('\n').map(async (line) => {
           const uri = line.trim()
+          // fMP4 ladders name their init segment in a tag
+          const map = /^#EXT-X-MAP:URI="([^"]+)"/.exec(uri)
+          if (map && !/^[a-z]+:/i.test(map[1])) return line.replace(map[1], await this.presign(dir + map[1], 'GET', 6 * 3600))
           if (!uri || uri.startsWith('#') || uri.endsWith('.m3u8') || /^[a-z]+:/i.test(uri)) return line
           return this.presign(dir + uri, 'GET', 6 * 3600)
         }),
@@ -283,6 +379,55 @@ class S3Storage implements Storage {
 
   async readableUrl(key: string) {
     return this.presign(key, 'GET', 3600)
+  }
+
+  /* multipart: the bucket's own multipart upload. Browsers PUT parts straight to presigned URLs; the server lists
+     what arrived (so browsers never need to read ETags, which buckets hide from CORS by default) and completes it. */
+  async multipartStart(key: string) {
+    const res = await this.aws.fetch(`${this.url(key)}?uploads`, { method: 'POST', headers: { 'Content-Type': contentType(key) } })
+    const id = /<UploadId>([^<]+)<\/UploadId>/.exec(await res.text())?.[1]
+    if (!res.ok || !id) throw new Error(`Couldn’t start a multipart upload (${res.status})`)
+    return id
+  }
+
+  async partTarget(key: string, uploadId: string, n: number): Promise<UploadTarget> {
+    return { url: await this.presign(key, 'PUT', 24 * 3600, { partNumber: String(n), uploadId }), method: 'PUT', headers: {} }
+  }
+
+  async listParts(key: string, uploadId: string) {
+    const parts: StoredPart[] = []
+    let marker = '0'
+    for (let page = 0; page < 20; page++) {
+      const res = await this.aws.fetch(`${this.url(key)}?uploadId=${encodeURIComponent(uploadId)}&part-number-marker=${marker}&max-parts=1000`)
+      if (res.status === 404) return []
+      if (!res.ok) throw new Error(`Couldn’t list uploaded parts (${res.status})`)
+      const xml = await res.text()
+      for (const m of xml.matchAll(/<Part>([\s\S]*?)<\/Part>/g)) {
+        const get = (tag: string) => new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(m[1])?.[1] ?? ''
+        parts.push({ number: Number(get('PartNumber')), size: Number(get('Size')), etag: get('ETag').replace(/&quot;/g, '"') })
+      }
+      if (!/<IsTruncated>true<\/IsTruncated>/.test(xml)) break
+      marker = /<NextPartNumberMarker>(\d+)<\/NextPartNumberMarker>/.exec(xml)?.[1] ?? marker
+    }
+    return parts.sort((a, b) => a.number - b.number)
+  }
+
+  async multipartComplete(key: string, uploadId: string, parts: StoredPart[]) {
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const body = `<CompleteMultipartUpload>${parts.map((p) => `<Part><PartNumber>${p.number}</PartNumber><ETag>${esc(p.etag)}</ETag></Part>`).join('')}</CompleteMultipartUpload>`
+    const res = await this.aws.fetch(`${this.url(key)}?uploadId=${encodeURIComponent(uploadId)}`, { method: 'POST', body, headers: { 'Content-Type': 'application/xml' } })
+    const text = await res.text()
+    // a 200 can still carry an <Error> (the bucket failed while joining)
+    if (!res.ok || /<Error>/.test(text)) throw new Error(`Couldn’t join the uploaded parts (${res.status}): ${/<Message>([^<]*)/.exec(text)?.[1] ?? 'unknown error'}`)
+  }
+
+  async multipartAbort(key: string, uploadId: string) {
+    await this.aws.fetch(`${this.url(key)}?uploadId=${encodeURIComponent(uploadId)}`, { method: 'DELETE' }).catch(() => {})
+  }
+
+  async remove(key: string) {
+    const res = await this.aws.fetch(this.url(key), { method: 'DELETE' })
+    if (!res.ok && res.status !== 404) throw new Error(`Couldn’t delete ${key} (${res.status})`)
   }
 
   async removePrefix(prefix: string) {
