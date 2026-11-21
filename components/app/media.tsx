@@ -57,7 +57,7 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 const PARALLEL = 2
-/** files from this size go up in parts */
+/** files from this size go up in parts (the server also splits smaller files that travel through the app) */
 const MULTIPART_FROM = 64 * 1024 ** 2
 const PART_PARALLEL = 4
 const PART_TRIES = 6
@@ -269,7 +269,8 @@ export function MediaProvider({ initial, initialSummary, children }: { initial: 
       let multipart = false
       try {
         // an earlier upload of this same file that stopped part-way: carry on from where it got to
-        const earlier = big ? readResumes()[fp] : undefined
+        // (the server may send smaller files in parts too, so any size can have one)
+        const earlier = readResumes()[fp]
         let resumed: { plan: MultipartUpload; have: Set<number> } | null = null
         if (earlier) {
           const res = await fetch(`/api/uploads/${earlier}/parts`, { cache: 'no-store' })
