@@ -16,6 +16,14 @@ The command uploads a generated video, reads it back through the worker storage 
 
 Keep the preceding provider key active for at least 24 hours and five minutes after the last writer switches. Check all writers, open uploads and jobs before retiring it at the provider. Temporary credentials can expire sooner than a signed link. For rollback, prove the still-valid previous provider credential and activate it as a new version. Use emergency revocation immediately for a compromised key and reissue affected media links.
 
+## Admin screen
+
+Site admins can open **Admin → Workspaces → the pilot studio → Storage credential**. Enter the replacement provider key, choose **Verify replacement**, and then **Activate credential**. Verification writes and deletes test media. Activation repeats the proof, checks the displayed version, and records the signed-in admin and verification time with the credential. The workspace audit log records the actions and versions. A timeout during activation can leave the client uncertain. Refresh the workspace to read the active version before retrying.
+
+Run the storage operator as a separate process from the same backend image using `MEDIAEX_PROCESS_ROLE=storage-operator` and `node --experimental-strip-types server.mts` in the backend directory. Use the existing MediaEX auth database, auth secret and frontend origin so the operator can validate the actual site-admin session. Give it a dedicated `MEDIAEX_API_TOKEN`, the bound pilot settings, and the scoped operator token file. Serve the process through a trusted HTTPS origin to the frontend. It accepts the pilot credential route and health probes. The ordinary API and encoders use their read identity. Mount the operator token only in the operator process.
+
+Set `MEDIAEX_STORAGE_OPERATOR_WORKSPACE` on the frontend to the pilot studio ID. Set `MEDIAEX_STORAGE_OPERATOR_URL` and `MEDIAEX_STORAGE_OPERATOR_SERVICE_TOKEN` to the operator origin and its dedicated transport token. The normal API token must be different. A site admin can now read the initial status and activate the first credential through the operator while existing API and encoder processes continue using their current storage settings. Confirm the active version before enrolling those processes in vault signing. Keep request-body capture disabled for this route throughout your proxy and monitoring systems. A vault outage blocks new signing operations for an enrolled studio.
+
 ## Exercise recovery
 
 For a local check without Docker, run `node --experimental-strip-types scripts/test-storage-vault-offline.mts` after installing backend dependencies. FFmpeg runs normally. The test supplies in-memory OpenBao and S3 responses and checks both directions of workspace isolation, failed rotation, an outage and preservation of an old playback URL.

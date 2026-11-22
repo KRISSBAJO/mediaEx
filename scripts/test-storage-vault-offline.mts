@@ -88,6 +88,14 @@ try {
   assert.deepEqual(await storageForWorkspace(workspace).getBuffer(key), payload)
   await storageForWorkspace(workspace).remove(key)
   await backup.remove(key)
+  if (process.env.MEDIAEX_TEST_STORAGE_ADMIN === '1') {
+    const { testStorageAdmin } = await import('./test-storage-vault-admin.mts')
+    await testStorageAdmin(keys[0], async checkInitialStatus => {
+      const savedRecord = record
+      record = undefined
+      try { await checkInitialStatus() } finally { record = savedRecord }
+    })
+  }
   console.log('Passed backup writes during a vault outage and restore into the pilot after recovery.')
   assert.equal(data.size, 0, 'Proof must clean up scratch objects.')
   console.log('Passed vault outage and fixture cleanup. FFmpeg ran locally with simulated OpenBao and S3 responses.')

@@ -27,6 +27,8 @@ import { statfs } from 'node:fs/promises'
 import path from 'node:path'
 import { audit, auth, baseURL, isVerifiedAdmin, pool, siteAdminEmails } from './auth.mts'
 import { retry } from './media/routes.mts'
+import { manageCredential } from './media/admin-storage-credential.mts'
+import { vaultStatus } from './media/storage-vault.mts'
 import { HttpError, handle, getAssetRow } from './media/assets.mts'
 import { storage } from './media/storage.mts'
 import { kickWorker } from './media/worker.mts'
@@ -310,7 +312,8 @@ async function oneWorkspace(id: string) {
     pool.query(`select "moderationMode", "aiReview", "extraCodecs", "autoCaptions" from "workspace_setting" where "organizationId" = $1`, [id]),
     pool.query(`select * from "admin_audit" where "targetType" = 'workspace' and "targetId" = $1 order by "createdAt" desc limit 30`, [id]),
   ])
-  return { workspace: { ...o, plan: effectivePlan(o) }, members, usage: { ...usage, bytes: Number(usage.bytes) }, assets, developer: dev, settings: settings[0] ?? null, audit: log }
+  return { workspace: { ...o, plan: effectivePlan(o) }, members, usage: { ...usage, bytes: Number(usage.bytes) }, assets, developer: dev, settings: settings[0] ?? null, audit: log,
+    storageCredential: await vaultStatus(id, 'admin') }
 }
 
 async function workspaceAction(a: Admin, req: Request, id: string, action: string) {
@@ -556,6 +559,7 @@ export async function handleAdmin(req: Request, parts: string[]) {
       if (id && sub && m === 'POST') return userAction(a, req, id, sub)
     }
     if (area === 'workspaces') {
+      if (id && sub === 'storage-credential') return manageCredential(req, id, a)
       if (!id && m === 'GET') return Response.json(await listWorkspaces(sp), { headers: noStore })
       if (id && !sub && m === 'GET') return Response.json(await oneWorkspace(id), { headers: noStore })
       if (id && !sub && m === 'DELETE') {

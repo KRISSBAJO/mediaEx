@@ -13,18 +13,25 @@ function safeApiPath(path: string) {
 
 // Allow an operator-configured gateway prefix. Validate the raw paths before URL normalizes dot segments.
 export async function backendFetch(path: string, init: RequestInit & { duplex?: 'half' } = {}) {
-  const configured = process.env.BACKEND_URL ?? (process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:3401')
+  const pathname = path.split('?', 1)[0]
+  const operator = /^\/api\/admin\/workspaces\/[A-Za-z0-9_-]+\/storage-credential$/.test(pathname)
+  if (operator && path !== pathname) throw new Error('Unexpected credential query.')
+  const configured = operator ? process.env.MEDIAEX_STORAGE_OPERATOR_URL :
+    process.env.BACKEND_URL ?? (process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:3401')
   if (!configured) throw new Error('BACKEND_URL is required.')
   const base = /^(https?:\/\/[^\s/@?#\\%]+)(\/[^?#]*)?$/i.exec(configured)
   const prefix = (base?.[2] ?? '').replace(/\/$/, '')
-  const pathname = path.split('?', 1)[0]
   if (!base || !safeApiPath(base[2] ?? '') || !pathname.startsWith('/api/') ||
       !safeApiPath(pathname) || path.includes('#')) {
     throw new Error('Invalid MediaEX API destination.')
   }
   const url = new URL(prefix + path, base[1])
+  if (operator && url.protocol !== 'https:' && !(process.env.NODE_ENV !== 'production' && ['127.0.0.1', '[::1]'].includes(url.hostname))) {
+    throw new Error('The storage operator requires HTTPS.')
+  }
   const headers = new Headers(init.headers)
-  const token = process.env.MEDIAEX_API_TOKEN
+  const token = operator ? process.env.MEDIAEX_STORAGE_OPERATOR_SERVICE_TOKEN : process.env.MEDIAEX_API_TOKEN
+  if (operator && (!token || token.length < 32 || token === process.env.MEDIAEX_API_TOKEN)) throw new Error('Storage operator connection unavailable.')
   if (process.env.NODE_ENV === 'production' && (!token || token.length < 32)) throw new Error('MEDIAEX_API_TOKEN is required.')
   headers.delete('x-mediaex-service-token')
   if (token) headers.set('x-mediaex-service-token', token)
