@@ -225,8 +225,11 @@ export async function startUpload(a: Actor, req: Request) {
   })
   let uploadId: string | undefined
   try {
-    if (b?.multipart === true || size > SINGLE_PUT_BYTES) {
-      const partSize = partSizeFor(size)
+    // Files sent through the app (local-disk storage) pass reverse proxies that cap request bodies (Hoist's ingress at
+    // 10 MB, Cloudflare at 100 MB), so dashboard uploads above one part always go in parts. Buckets take files directly.
+    const throughApp = isLocal(store) && a.via === 'session' && size > APP_PART_BYTES
+    if (b?.multipart === true || size > SINGLE_PUT_BYTES || throughApp) {
+      const partSize = partSizeFor(size, isLocal(store))
       uploadId = await store.multipartStart(originalKey)
       const plan = { uploadId, partSize, partCount: Math.ceil(size / partSize) }
       await pool.query('update asset set upload = $2 where id = $1', [id, JSON.stringify(plan)])
@@ -273,7 +276,9 @@ async function withUploadLock<T>(row: AssetRow, shared: boolean, run: (db: PoolC
 }
 
 const MiB = 1024 ** 2
-const partSizeFor = (size: number) => Math.max(16 * MiB, Math.ceil(size / 9000 / MiB) * MiB)
+/** parts sent through the app stay under common proxy body limits; bucket parts are larger to keep the count down */
+const APP_PART_BYTES = 8 * MiB
+const partSizeFor = (size: number, local: boolean) => Math.max(local ? APP_PART_BYTES : 16 * MiB, Math.ceil(size / 9000 / MiB) * MiB)
 const partLength = (size: number, plan: NonNullable<AssetRow['upload']>, n: number) => (n < plan.partCount ? plan.partSize : size - plan.partSize * (plan.partCount - 1))
 
 async function inParts(a: Actor, id: string) {
