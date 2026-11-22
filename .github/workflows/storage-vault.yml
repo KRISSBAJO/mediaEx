@@ -10,7 +10,7 @@ permissions:
 jobs:
   rotate-and-recover:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -20,6 +20,6 @@ jobs:
           node-version: '22'
       - run: npm ci --prefix backend --no-audit --no-fund
       - run: npm run build --prefix backend
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - run: command -v ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
       - run: node --experimental-strip-types scripts/test-storage-vault-offline.mts
       - run: python3 scripts/test-storage-vault.py

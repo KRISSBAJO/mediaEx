@@ -11,8 +11,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 BAO = "ghcr.io/openbao/openbao:2.7.3"
-MINIO = "minio/minio:RELEASE.2025-09-07T16-13-09Z"
-MC = "minio/mc:RELEASE.2025-08-13T08-35-41Z"
+MINIO = "mediaex-pilot/minio:07c3a42"
+MC = "mediaex-pilot/mc:7394ce0"
 REPO = Path(__file__).resolve().parents[1]
 VAULT_PATH = "mediaex/data/workspaces/studio-a/storage"
 
@@ -59,6 +59,20 @@ def port(name, number):
     return "http://" + run(["docker", "port", name, str(number) + "/tcp"]).decode().splitlines()[0]
 
 
+def build_minio(folder, name, revision, image):
+    # Build the disposable services from verified upstream Git revisions.
+    src = folder / name
+    subprocess.run(["git", "init", "-q", str(src)], check=True)
+    subprocess.run(["git", "-C", str(src), "fetch", "--quiet", "--depth=1", f"https://github.com/minio/{name}.git", revision], check=True)
+    subprocess.run(["git", "-C", str(src), "checkout", "--quiet", "--detach", revision], check=True)
+    context = folder / (name + "-image")
+    context.mkdir()
+    subprocess.run(["go", "build", "-trimpath", "-o", str(context / name), "."], cwd=src, check=True,
+                   env={**os.environ, "CGO_ENABLED": "0"})
+    (context / "Dockerfile").write_text(f'FROM scratch\nCOPY {name} /{name}\nENV HOME=/tmp\nENTRYPOINT ["/{name}"]\n')
+    subprocess.run(["docker", "build", "-q", "-t", image, str(context)], check=True)
+
+
 def start_bao(name, folder):
     config = folder / "bao.hcl"
     config.write_text('disable_mlock = true\napi_addr = "http://127.0.0.1:8200"\ncluster_addr = "https://127.0.0.1:8201"\n'
@@ -90,8 +104,9 @@ def main(folder):
     sensitive = [k["secretAccessKey"] for k in keys]
     try:
         phase = "pulling the public fixture images"
-        for image in (BAO, MINIO, MC):
-            subprocess.run(["docker", "pull", image], check=True, timeout=180)
+        subprocess.run(["docker", "pull", BAO], check=True, timeout=180)
+        build_minio(folder, "minio", "07c3a429bfed433e49018cb0f78a52145d4bedeb", MINIO)
+        build_minio(folder, "mc", "7394ce0dd2a80935aded936b09fa12cbb3cb8096", MC)
         phase = "starting OpenBao and MinIO"
         addr, init = start_bao(source, folder)
         root = init["root_token"]
