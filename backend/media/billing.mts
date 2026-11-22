@@ -28,12 +28,12 @@ import { committedStorage, processingMinutesForPeriod } from './operations.mts'
 import type { BillingInterval, BillingState, PlanId } from './types.mts'
 
 /* ------------------------------------------------ plans */
-export const PLANS: Record<PlanId, { name: string; month: number; year: number; storageBytes: number | null; minutes: number | null; maxShortSide: number; extraCodecs: boolean }> = {
+export const PLANS: Record<PlanId, { name: string; month: number; year: number; storageBytes: number | null; minutes: number | null; maxShortSide: number; extraCodecs: boolean; backups: boolean }> = {
   // prices in USD; yearly is the whole year (the site shows it per month)
-  creator: { name: 'Creator', month: 0, year: 0, storageBytes: 100e9, minutes: 50, maxShortSide: 1080, extraCodecs: false },
-  pro: { name: 'Pro', month: 24, year: 228, storageBytes: 2e12, minutes: 1000, maxShortSide: 2160, extraCodecs: true },
+  creator: { name: 'Creator', month: 0, year: 0, storageBytes: 100e9, minutes: 50, maxShortSide: 1080, extraCodecs: false, backups: false },
+  pro: { name: 'Pro', month: 24, year: 228, storageBytes: 2e12, minutes: 1000, maxShortSide: 2160, extraCodecs: true, backups: true },
   // 10 TB included, then billed as you go: never blocked
-  studio: { name: 'Studio', month: 99, year: 948, storageBytes: null, minutes: null, maxShortSide: 4320, extraCodecs: true },
+  studio: { name: 'Studio', month: 99, year: 948, storageBytes: null, minutes: null, maxShortSide: 4320, extraCodecs: true, backups: true },
 }
 const STUDIO_INCLUDED = 10e12
 const PAID: PlanId[] = ['pro', 'studio']

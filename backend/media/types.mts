@@ -352,3 +352,17 @@ export type RetentionRule = RetentionDraft & {
 }
 export type RetentionPreview = { count: number; bytes: number; samples: { id: string; title: string; type: MediaType }[] }
 export type RetentionEvent = { name: string; action: string; moved: number | null; actor: string | null; createdAt: string }
+
+/** Backup copies of originals in a second store. See backup.mts. */
+export type BackupStats = { originals: number; copied: number; waiting: number; failed: number; removing: number; bytes: number; lastCopiedAt: string | null }
+export type BackupSettings = {
+  /** a backup store is configured on this server */
+  available: boolean
+  /** where copies live, as the operator describes it (BACKUP_LABEL) */
+  location: string | null
+  planIncludes: boolean
+  enabled: boolean
+  changedAt: string | null
+  stats: BackupStats
+}
+export type AssetBackup = { status: 'none' | 'copying' | 'copied' | 'failed' | 'removing'; copiedAt: string | null; bytes: number | null; error: string | null }

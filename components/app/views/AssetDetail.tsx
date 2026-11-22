@@ -9,6 +9,7 @@ import Icon from '../Icon'
 import MediaPlayer from '../MediaPlayer'
 import MetadataEditor from '../MetadataEditor'
 import { VersionPanel } from './Recovery'
+import { AssetBackupRow } from './SettingsBackups'
 import CaptionsPanel from '../CaptionsPanel'
 import TransformBuilder from '../TransformBuilder'
 import { flatTree, request, useLibrary } from '../library'
@@ -423,6 +424,7 @@ export default function AssetDetail({ id, initial }: { id: string; initial: Medi
                   {bytes(a.size)} original{a.outputSize ? ` + ${bytes(a.outputSize)} outputs` : ''}
                 </dd>
               </div>
+              <AssetBackupRow assetId={a.id} />
               {ready && a.type !== 'image' && (
                 <div>
                   <dt>Audience</dt>
