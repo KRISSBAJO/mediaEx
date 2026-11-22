@@ -10,7 +10,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -66,6 +66,8 @@ export interface Storage {
   remove(key: string): Promise<void>
   /** store a generated file (transformations) */
   putBuffer(key: string, data: Buffer, type: string): Promise<void>
+  /** store a file from this machine's disk, of any size (backup copies, see backup.mts) */
+  putFile(key: string, file: string): Promise<void>
   /** read a whole stored file into memory (small files only), or null when it doesn't exist */
   getBuffer(key: string): Promise<Buffer | null>
   /** something FFmpeg can open directly: a local path, or a short-lived signed URL it can range-request */
@@ -194,6 +196,19 @@ class LocalStorage implements Storage {
     const tmp = `${file}.${process.pid}.part`
     await writeFile(tmp, data)
     await rename(tmp, file)
+  }
+
+  async putFile(key: string, source: string) {
+    const file = this.path(key)
+    await mkdir(path.dirname(file), { recursive: true })
+    const tmp = `${file}.${process.pid}.part`
+    try {
+      await copyFile(source, tmp)
+      await rename(tmp, file)
+    } catch (e) {
+      await rm(tmp, { force: true })
+      throw e
+    }
   }
 
   async getBuffer(key: string) {
@@ -425,6 +440,35 @@ export class S3Storage implements Storage {
     if (!res.ok) throw new Error(`Couldn’t store ${key} (${res.status})`)
   }
 
+  /** One PUT up to 64 MB, else a multipart upload in 64 MB parts (S3 allows up to 10,000 parts). */
+  async putFile(key: string, file: string) {
+    const PART = 64 * 1024 * 1024
+    const { size } = await stat(file)
+    const type = contentType(key)
+    if (size <= PART) {
+      return this.putBuffer(key, await readFile(file), type)
+    }
+    const uploadId = await this.multipartStart(key)
+    const handle = await open(file, 'r')
+    try {
+      const parts: StoredPart[] = []
+      const chunk = Buffer.alloc(PART)
+      for (let n = 1, offset = 0; offset < size; n++, offset += PART) {
+        const { bytesRead } = await handle.read(chunk, 0, Math.min(PART, size - offset), offset)
+        const res = await this.request(key, `${this.url(key)}?partNumber=${n}&uploadId=${encodeURIComponent(uploadId)}`, { method: 'PUT', body: new Uint8Array(chunk.subarray(0, bytesRead)) })
+        const etag = res.headers.get('etag')
+        if (!res.ok || !etag) throw new Error(`Couldn’t store part ${n} of ${key} (${res.status})`)
+        parts.push({ number: n, size: bytesRead, etag })
+      }
+      await this.multipartComplete(key, uploadId, parts)
+    } catch (e) {
+      await this.multipartAbort(key, uploadId).catch(() => undefined)
+      throw e
+    } finally {
+      await handle.close()
+    }
+  }
+
   async getBuffer(key: string) {
     const res = await this.request(key, this.url(key))
     if (res.status === 404) return null
@@ -601,6 +645,38 @@ export function storage(asset?: { storageBackend: Storage['kind']; organizationI
 
 export function storageForWorkspace(workspaceId: string) {
   return storage({ storageBackend: newStorageKind(workspaceId), organizationId: workspaceId })
+}
+
+/**
+ * The backup store (backup.mts): a second S3-compatible bucket (BACKUP_S3_*) or a second disk (BACKUP_DIR), never
+ * the media store itself. Null when no backup store is configured.
+ */
+let backup: Storage | null | undefined
+export function backupLocation(env = process.env): string | null {
+  if (env.BACKUP_S3_BUCKET && env.BACKUP_S3_ENDPOINT && env.BACKUP_S3_ACCESS_KEY_ID && env.BACKUP_S3_SECRET_ACCESS_KEY) {
+    return env.BACKUP_S3_ENDPOINT.replace(/\/+$/, '') + '/' + env.BACKUP_S3_BUCKET
+  }
+  return env.BACKUP_DIR ? path.resolve(env.BACKUP_DIR) : null
+}
+export function backupStore(): Storage | null {
+  if (backup !== undefined) return backup
+  const location = backupLocation()
+  const media = [path.resolve(process.env.MEDIA_DIR || '.media'), process.env.S3_ENDPOINT && process.env.S3_BUCKET ? process.env.S3_ENDPOINT.replace(/\/+$/, '') + '/' + process.env.S3_BUCKET : null]
+  if (location && media.some(m => m && (m === location || location.startsWith(m + path.sep) || m.startsWith(location + path.sep)))) {
+    throw new Error('The backup store must be separate from the media store.')
+  }
+  const { BACKUP_S3_BUCKET, BACKUP_S3_ENDPOINT, BACKUP_S3_REGION, BACKUP_S3_ACCESS_KEY_ID, BACKUP_S3_SECRET_ACCESS_KEY, BACKUP_S3_SESSION_TOKEN } = process.env
+  if (!location) return backup = null
+  if (BACKUP_S3_BUCKET && BACKUP_S3_ENDPOINT && BACKUP_S3_ACCESS_KEY_ID && BACKUP_S3_SECRET_ACCESS_KEY) {
+    const client = new AwsClient({
+      accessKeyId: BACKUP_S3_ACCESS_KEY_ID, secretAccessKey: BACKUP_S3_SECRET_ACCESS_KEY,
+      sessionToken: BACKUP_S3_SESSION_TOKEN, region: BACKUP_S3_REGION || 'auto', service: 's3',
+    })
+    backup = new S3Storage(BACKUP_S3_ENDPOINT.replace(/\/+$/, ''), BACKUP_S3_BUCKET, async () => client)
+  } else {
+    backup = new LocalStorage(location)
+  }
+  return backup
 }
 
 export const isLocal = (s: Storage): s is LocalStorage => s.kind === 'local'

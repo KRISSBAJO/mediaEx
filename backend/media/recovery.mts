@@ -4,6 +4,7 @@ import { HttpError, prefixOf, type AssetRow } from './assets.mts'
 import { type Actor } from './keys.mts'
 import { checkProbedPolicy } from './presets.mts'
 import { storage } from './storage.mts'
+import { removeBackupCopies } from './backup.mts'
 import { emitAsset } from './webhooks.mts'
 
 const noStore = { 'Cache-Control': 'private, no-store' }
@@ -271,6 +272,7 @@ async function removeCopies(db: PoolClient, row: { id: string; organizationId: s
     if (version.upload) await store.multipartAbort(version.originalKey, version.upload.uploadId)
     await store.removePrefix(prefix)
   }
+  for (const prefix of new Set(plan.map(item => item.prefix))) await removeBackupCopies(db, row.organizationId, prefix)
 }
 
 async function purgeOne(db: PoolClient, row: VersionRow) {

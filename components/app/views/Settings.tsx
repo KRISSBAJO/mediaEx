@@ -15,8 +15,9 @@ import SettingsMetadata from './SettingsMetadata'
 import SettingsModeration from './SettingsModeration'
 import SettingsEncoding from './SettingsEncoding'
 import SettingsRetention from './SettingsRetention'
+import SettingsBackups from './SettingsBackups'
 
-type Tab = 'uploads' | 'retention' | 'general' | 'team' | 'metadata' | 'moderation' | 'encoding' | 'account' | 'billing'
+type Tab = 'uploads' | 'retention' | 'backups' | 'general' | 'team' | 'metadata' | 'moderation' | 'encoding' | 'account' | 'billing'
 const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' }
 const ROLE_HELP: Record<Role, string> = {
   owner: 'Everything, including deleting the workspace',
@@ -664,6 +665,7 @@ const SECTIONS: { value: Tab; label: string; icon: string }[] = [
   { value: 'uploads', label: 'Upload presets', icon: 'upload' },
   { value: 'encoding', label: 'Encoding', icon: 'layers' },
   { value: 'retention', label: 'Retention', icon: 'clock' },
+  { value: 'backups', label: 'Backups', icon: 'copy' },
   { value: 'account', label: 'Account', icon: 'settings' },
   { value: 'billing', label: 'Billing', icon: 'card' },
 ]
@@ -673,7 +675,7 @@ export default function Settings() {
   const router = useRouter()
   const { workspace } = useAccount()
   const raw = params.get('tab')
-  const tab: Tab = raw === 'uploads' || raw === 'team' || raw === 'billing' || raw === 'account' || raw === 'metadata' || raw === 'moderation' || raw === 'encoding' || raw === 'retention' ? raw : 'general'
+  const tab: Tab = raw === 'uploads' || raw === 'team' || raw === 'billing' || raw === 'account' || raw === 'metadata' || raw === 'moderation' || raw === 'encoding' || raw === 'retention' || raw === 'backups' ? raw : 'general'
 
   return (
     <>
@@ -701,6 +703,7 @@ export default function Settings() {
           {tab === 'uploads' && <SettingsUploads />}
           {tab === 'encoding' && <SettingsEncoding />}
           {tab === 'retention' && <SettingsRetention />}
+          {tab === 'backups' && <SettingsBackups />}
           {tab === 'billing' && <Billing />}
         </div>
       </div>

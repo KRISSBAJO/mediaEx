@@ -10,6 +10,8 @@ const keys = [0, 1].map(() => ({ accessKeyId: randomBytes(12).toString('hex'), s
 const operator = randomBytes(16).toString('hex')
 const reader = randomBytes(16).toString('hex')
 const bucket = 'pilot-media'
+const backupBucket = 'pilot-backups'
+const backupId = randomBytes(12).toString('hex')
 const workspace = 'studio-a'
 const data = new Map<string, Uint8Array<ArrayBuffer>>()
 let version = 0
@@ -20,6 +22,8 @@ const changed = Object.entries({
   MEDIAEX_VAULT_ADDR: 'https://vault.invalid', MEDIAEX_VAULT_WORKSPACE: workspace, MEDIAEX_S3_WORKSPACE_IDS: workspace,
   MEDIAEX_VAULT_OPERATOR_TOKEN_FILE: path.join(scratch,'operator'), MEDIAEX_VAULT_TOKEN_FILE: path.join(scratch,'reader'),
   S3_ENDPOINT: 'https://s3.invalid', S3_REGION: 'us-east-1', S3_BUCKET: bucket,
+  BACKUP_S3_ENDPOINT: 'https://s3.invalid', BACKUP_S3_REGION: 'us-east-1', BACKUP_S3_BUCKET: backupBucket,
+  BACKUP_S3_ACCESS_KEY_ID: backupId, BACKUP_S3_SECRET_ACCESS_KEY: randomBytes(32).toString('hex'),
 })
 const originalFetch = globalThis.fetch
 const before = { ...process.env }
@@ -48,7 +52,9 @@ try {
     }
     if (url.origin !== 'https://s3.invalid') throw new Error('Unexpected test host.')
     const credential = url.searchParams.get('X-Amz-Credential')?.split('/')[0] || req.headers.get('Authorization')?.match(/Credential=([^/]+)/)?.[1]
-    if (!keys.some(k => k.accessKeyId === credential) || !url.pathname.startsWith('/' + bucket + '/' + workspace + '/')) return json({},403)
+    const isBackup = url.pathname.startsWith('/' + backupBucket + '/' + workspace + '/')
+    const isMedia = url.pathname.startsWith('/' + bucket + '/' + workspace + '/')
+    if (!(isBackup && credential === backupId) && !(isMedia && keys.some(k => k.accessKeyId === credential))) return json({},403)
     if (req.method === 'PUT') {
       data.set(url.pathname,new Uint8Array(await req.arrayBuffer()))
       return new Response(null,{status:200})
@@ -62,11 +68,27 @@ try {
   }
   process.argv[2] = keyFile
   await import('./test-storage-vault.mts')
-  const { storageForWorkspace } = await import('../backend/media/storage.mts')
+  const { backupStore, storageForWorkspace } = await import('../backend/media/storage.mts')
   const { vaultStatus } = await import('../backend/media/storage-vault.mts')
   vaultUp = false
   await assert.rejects(storageForWorkspace(workspace).readableUrl('studio-a/test/file.mp4'))
   assert.deepEqual(await vaultStatus(workspace, 'owner'), {state:'unavailable'})
+  const backup = backupStore()
+  assert.ok(backup)
+  const key = workspace + '/continuity/backup.bin'
+  const payload = randomBytes(256)
+  const source = path.join(scratch, 'original.bin')
+  await writeFile(source, payload)
+  await backup.putFile(key, source)
+  assert.deepEqual(await backup.getBuffer(key), payload)
+  await assert.rejects(storageForWorkspace(workspace).putFile(key, source))
+  vaultUp = true
+  const saved = await backup.localCopy(key, scratch)
+  await storageForWorkspace(workspace).putFile(key, saved)
+  assert.deepEqual(await storageForWorkspace(workspace).getBuffer(key), payload)
+  await storageForWorkspace(workspace).remove(key)
+  await backup.remove(key)
+  console.log('Passed backup writes during a vault outage and restore into the pilot after recovery.')
   assert.equal(data.size, 0, 'Proof must clean up scratch objects.')
   console.log('Passed vault outage and fixture cleanup. FFmpeg ran locally with simulated OpenBao and S3 responses.')
 } finally {
