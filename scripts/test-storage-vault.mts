@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { storageForWorkspace, storage } from '../backend/media/storage.mts'
 import { StorageVault, vaultStatus, type StorageKey } from '../backend/media/storage-vault.mts'
 import { rotate } from '../backend/rotate-storage.mts'
@@ -48,6 +49,15 @@ const secondStudio = storage({ storageBackend: 's3', organizationId: 'studio-b' 
 await assert.rejects(secondStudio.readableUrl(asset), /belongs to another workspace/)
 await assert.rejects(store.readableUrl(otherKey), /belongs to another workspace/)
 await assert.rejects(secondStudio.readableUrl(otherKey), /unavailable for this workspace/)
+if (process.env.MEDIAEX_TEST_PROVIDER_POLICY === '1') {
+  const { AwsClient } = createRequire(new URL('../backend/package.json', import.meta.url))('aws4fetch')
+  const client = new AwsClient({ ...keys[1], region: vault.scope.region, service: 's3', retries: 0 })
+  const denied = await client.fetch(vault.scope.endpoint + '/' + vault.scope.bucket + '/' + otherKey, {
+    method: 'PUT', body: 'fixture', redirect: 'error', signal: AbortSignal.timeout(10000),
+  })
+  assert.equal(denied.status, 403, 'Storage provider must reject a valid key outside its studio')
+  assert.ok((await denied.text()).includes('<Code>AccessDenied</Code>'), 'Expected S3 AccessDenied')
+}
 assert.equal(await vaultStatus('studio-b', 'owner'), null)
 assert.equal(await vaultStatus(vault.scope.workspace, 'member'), null)
 const status = await vaultStatus(vault.scope.workspace, 'owner')

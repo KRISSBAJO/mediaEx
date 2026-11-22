@@ -143,7 +143,7 @@ def main(folder):
         for name, value in [("runtime", runtime), ("operator", operator), ("keys.json", json.dumps(keys))]:
             (folder / name).write_text(value)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("S3_", "MEDIAEX_VAULT_", "MEDIAEX_S3_", "AWS_"))}
-        env.update(MEDIAEX_VAULT_WORKSPACE="studio-a", MEDIAEX_S3_WORKSPACE_IDS="studio-a", MEDIAEX_VAULT_ADDR=addr,
+        env.update(MEDIAEX_TEST_PROVIDER_POLICY="1", MEDIAEX_VAULT_WORKSPACE="studio-a", MEDIAEX_S3_WORKSPACE_IDS="studio-a", MEDIAEX_VAULT_ADDR=addr,
                    MEDIAEX_VAULT_TOKEN_FILE=str(folder / "runtime"), MEDIAEX_VAULT_OPERATOR_TOKEN_FILE=str(folder / "operator"),
                    S3_BUCKET=bucket, S3_REGION="us-east-1", S3_ENDPOINT=endpoint)
         phase = "media proof, rotation and isolation"
@@ -159,11 +159,6 @@ def main(folder):
         print(check.stdout.decode().strip(), flush=True)
         assert api(addr, VAULT_PATH, other)[0] == 403
         assert api(addr, VAULT_PATH, runtime, {"options": {"cas": 2}, "data": {}})[0] == 403
-        # Try the actual prefix-restricted S3 identity outside its workspace.
-        forbidden = subprocess.run(["docker", "run", "--rm", "-i", "--network", "container:" + bucket_host,
-                                    "-e", f"MC_HOST_bound=http://{keys[1]['accessKeyId']}:{keys[1]['secretAccessKey']}@127.0.0.1:9000",
-                                    MC, "pipe", f"bound/{bucket}/studio-b/forbidden"], input=b"probe", capture_output=True)
-        assert forbidden.returncode != 0 and b"denied" in (forbidden.stdout + forbidden.stderr).lower()
         phase = "audit verification"
         audit = run(["docker", "exec", source, "cat", "/tmp/pilot-audit.jsonl"])
         assert all(v.encode() not in audit for v in sensitive)
