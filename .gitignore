@@ -8,3 +8,4 @@ tsconfig.tsbuildinfo
 !.env.example
 .mailbox
 .media
+.media-backup

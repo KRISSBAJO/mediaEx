@@ -4807,3 +4807,103 @@ b .apill {
     margin-left: 0;
   }
 }
+
+/* ------------------------------------------------ settings → backups */
+.backup-callout {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--raise);
+}
+.backup-callout > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--muted);
+}
+.backup-callout p {
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.backup-summary {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.backup-meter {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--raise-2);
+}
+.backup-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--good);
+  transition: width 0.6s ease;
+}
+.backup-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin: 18px 0 0;
+}
+.backup-stats div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.backup-stats dt {
+  font: 500 11.5px/1.2 var(--font-body);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.backup-stats dd {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+.backup-stats dd small {
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 400;
+}
+.backup-stats .backup-location {
+  font-size: 14.5px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.backup-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.backup-line svg {
+  flex: none;
+  margin-top: 2px;
+}
+.backup-line.is-good svg {
+  color: var(--good);
+}
+.backup-line.is-warn svg {
+  color: var(--warn);
+}
+.details dd .backup-restore {
+  display: flex;
+  margin-top: 8px;
+  margin-left: -10px;
+}
+@media (max-width: 720px) {
+  .backup-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

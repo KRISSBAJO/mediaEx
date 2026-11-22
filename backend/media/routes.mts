@@ -9,7 +9,7 @@
  *   POST   /api/assets/:id/restore            restore during the 30-day recovery window
  *   GET    /api/assets/:id/revisions          version and recovery history
  *   POST   /api/assets/:id/revisions          publish a replacement or restore a saved version
- *   (retention rules, /api/assets/retention: see retention.mts)
+ *   (retention rules, /api/assets/retention: see retention.mts · backup copies, /api/assets/backup: see backup.mts)
  *   POST   /api/assets/:id/retry             run the pipeline again
  *   POST   /api/uploads                      start an upload           { fileName, size, mimeType, multipart? }
  *   PUT    /api/uploads/:id                  the file itself (local-disk storage only)
@@ -34,6 +34,7 @@
  */
 import { recovery, trashAssets } from './recovery.mts'
 import { handleRetention } from './retention.mts'
+import { handleAssetBackup, handleBackup } from './backup.mts'
 import type { PoolClient } from 'pg'
 import { pool } from '../auth.mts'
 import { guessType, normaliseTag, parseQuery } from './types.mts'
@@ -468,6 +469,7 @@ export async function handleMedia(req: Request, pathname: string): Promise<Respo
   if (['folders', 'collections', 'tags', 'searches'].includes(parts[1])) return handle(() => handleLibrary(req, parts))
   if (parts[1] === 'moderation' && parts.length === 3) return handle(() => handleModeration(req, parts[2]))
   if (parts[1] === 'assets' && parts[2] === 'trash' && parts.length === 3) return handle(async () => recovery(await sessionActor(req.headers), req, undefined, 'trash'))
+  if (parts[1] === 'assets' && parts[2] === 'backup' && parts.length === 3) return handle(() => handleBackup(req))
   if (parts[1] === 'assets' && parts[2] === 'retention' && parts.length <= 5) return handle(() => handleRetention(req, parts))
   if (parts[1] === 'assets' && parts[2] === 'bulk' && parts.length === 3) return handle(() => bulk(req))
   let id: string | undefined
@@ -483,6 +485,7 @@ export async function handleMedia(req: Request, pathname: string): Promise<Respo
       if (!id && m === 'GET') return listAll(req)
       if (id && parts.length === 4 && ['restore','revisions'].includes(parts[3])) return recovery(await sessionActor(req.headers), req, id, parts[3])
       if (id && parts.length === 3) return one(await sessionActor(req.headers), req, id)
+      if (id && parts[3] === 'backup' && parts.length <= 5) return handleAssetBackup(req, id, parts[4])
       if (id && parts[3] === 'retry' && parts.length === 4 && m === 'POST') return retry(await sessionActor(req.headers), id)
       if (id && parts[3] === 'playback-token' && parts.length === 4 && m === 'POST') return playbackToken(await sessionActor(req.headers), req, id)
       if (id && parts[3] === 'captions' && parts.length <= 5) return captions(await sessionActor(req.headers), req, id, parts[4])

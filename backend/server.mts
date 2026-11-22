@@ -11,6 +11,7 @@ import { startCaptioner } from './media/captions.mts'
 import { handleAdmin } from './admin.mts'
 import { startDispatcher } from './media/webhooks.mts'
 import { startOperationsMaintenance } from './media/maintenance.mts'
+import { startBackups } from './media/backup.mts'
 
 const frontend = new URL(baseURL)
 const serviceToken = process.env.MEDIAEX_API_TOKEN
@@ -127,6 +128,7 @@ server.listen(port, '0.0.0.0', () => {
     startWorker()
     startCaptioner()
     startOperationsMaintenance()
+    startBackups()
   }
   // webhook deliveries are claimed from Postgres, so every instance can help send them
   startDispatcher()
