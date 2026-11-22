@@ -24,6 +24,34 @@ const read = async (url: string) => {
 function signedBy(url: string, key: StorageKey) {
   assert.ok(new URL(url).searchParams.get('X-Amz-Credential')?.startsWith(key.accessKeyId + '/'), 'Unexpected signing credential')
 }
+async function startMultipartProof() {
+  const key = prefix + '/multipart.bin'
+  const id = await store.multipartStart(key)
+  const first = randomBytes(5 * 1024 * 1024)
+  const last = randomBytes(64)
+  async function send(target: { url: string; headers: Record<string, string> }, bytes: Buffer<ArrayBuffer>) {
+    signedBy(target.url, keys[0])
+    const response = await fetch(target.url, {
+      method: 'PUT', headers: target.headers, body: bytes, redirect: 'error', signal: AbortSignal.timeout(30000),
+    })
+    assert.equal(response.status, 200, 'Multipart part upload failed')
+  }
+  await send(await store.partTarget(key, id, 1, 'continuity', first.length), first)
+  const preissued = await store.partTarget(key, id, 2, 'continuity', last.length)
+  return async () => {
+    await send(preissued, last)
+    const parts = await store.listParts(key, id)
+    assert.deepEqual(parts.map(p => [p.number, p.size]), [[1, first.length], [2, last.length]])
+    await store.multipartComplete(key, id, parts)
+    const url = await store.readableUrl(key)
+    signedBy(url, keys[1])
+    const result = await fetchMedia(url)
+    assert.equal(result.status, 200)
+    assert.ok(Buffer.from(await result.arrayBuffer()).equals(Buffer.concat([first, last])), 'Assembled bytes differ')
+    await store.remove(key)
+    console.log('Passed multipart continuity across rotation using the old part URL and the new completion credential.')
+  }
+}
 const initial = await rotate(vault, 0, keys[0])
 assert.equal(initial.version, 1)
 await store.putBuffer(asset, content, 'application/octet-stream')
@@ -33,6 +61,7 @@ await read(oldUrl)
 await assert.rejects(rotate(vault, 1, { accessKeyId: 'invalid', secretAccessKey: 'invalid' }))
 assert.equal((await vault.current())?.version, 1)
 await read(await store.readableUrl(asset))
+const finishMultipart = process.env.MEDIAEX_TEST_PROVIDER_POLICY === '1' ? await startMultipartProof() : null
 const replacement = await rotate(vault, 1, keys[1])
 assert.equal(replacement.version, 2)
 assert.equal(replacement.previousVersion, 1)
@@ -41,6 +70,7 @@ const newUrl = await store.readableUrl(asset)
 signedBy(newUrl, keys[1])
 await read(newUrl)
 await read(oldUrl)
+if (finishMultipart) await finishMultipart()
 await assert.rejects(rotate(vault, 1, keys[0]), /changed/)
 await assert.rejects(vault.activate(1, keys[0], replacement), /refused/)
 assert.equal((await vault.current())?.version, 2)
