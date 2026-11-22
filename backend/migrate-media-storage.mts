@@ -42,7 +42,7 @@ async function move(db: PoolClient, workspace: string, id: string) {
   if (rollback && before.receipt !== inventory.digest) throw new Error('Retained disk content changed since migration.')
   const result = { asset: id, objects: inventory.files.length, bytes: inventory.bytes, sha256: inventory.digest }
   if (!opt.apply) return log({ ...result, result: rollback ? 'local rollback inventory verified' : 'eligible local inventory' })
-  const bucket = storage({ storageBackend: 's3' })
+  const bucket = storage({ storageBackend: 's3', organizationId: before.organizationId })
   await verifyBucket(bucket, inventory, before, rollback)
   // Re-read all local keys and bytes to detect a changing mount before switching.
   if ((await localInventory(directory, before)).digest !== inventory.digest) throw new Error('Disk inventory changed during verification.')

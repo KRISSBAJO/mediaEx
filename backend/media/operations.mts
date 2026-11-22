@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg'
 import { pool } from '../auth.mts'
 import { requireMember, HttpError } from './assets.mts'
+import { vaultStatus } from './storage-vault.mts'
 
 type Database = Pick<PoolClient, 'query'>
 export type OperationalError = {
@@ -29,6 +30,7 @@ export type OperationsReport = CurrentStorage & {
   errors: number
   details: OperationalError[] | null
   cleanupEnabled: boolean
+  storageCredential: Awaited<ReturnType<typeof vaultStatus>>
 }
 
 export const cleanupEnabled = () => process.env.MEDIA_CLEAN_EXPIRED_UPLOADS === 'on'
@@ -79,7 +81,7 @@ export async function workspaceOperations(orgId: string, role: string, db: Datab
       where e.org_id = $1 and e.recorded_at >= now() - interval '30 days'
       order by e.recorded_at desc, e.id desc limit 50`, [orgId]) : null,
   ])
-  return { ...current, ...activity.rows[0], details: details?.rows ?? null, cleanupEnabled: cleanupEnabled() }
+  return { ...current, ...activity.rows[0], details: details?.rows ?? null, cleanupEnabled: cleanupEnabled(), storageCredential: await vaultStatus(orgId, role) }
 }
 
 export async function handleOperations(req: Request) {

@@ -15,6 +15,7 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { AwsClient } from 'aws4fetch'
+import { StorageVault, workspaceSigner } from './storage-vault.mts'
 
 const TYPES: Record<string, string> = {
   m3u8: 'application/vnd.apple.mpegurl',
@@ -286,15 +287,22 @@ class LocalStorage implements Storage {
 }
 
 /* ------------------------------------------------ S3-compatible bucket */
-class S3Storage implements Storage {
+export class S3Storage implements Storage {
   kind = 's3' as const
-  private aws: AwsClient
+  private signer: (key: string) => Promise<AwsClient>
+  private transport?: Pick<RequestInit, 'redirect' | 'signal'>
   private endpoint: string
   private bucket: string
-  constructor(endpoint: string, bucket: string, region: string, accessKeyId: string, secretAccessKey: string, sessionToken?: string) {
+  constructor(endpoint: string, bucket: string, signer: (key: string) => Promise<AwsClient>, transport?: Pick<RequestInit, 'redirect' | 'signal'>) {
     this.endpoint = endpoint
     this.bucket = bucket
-    this.aws = new AwsClient({ accessKeyId, secretAccessKey, sessionToken, service: 's3', region })
+    this.signer = signer
+    this.transport = transport
+  }
+
+  private async request(key: string, input: URL | string, init?: RequestInit) {
+    const aws = await this.signer(key)
+    return aws.fetch(input, { ...this.transport, ...init })
   }
 
   private url(key: string) {
@@ -307,7 +315,8 @@ class S3Storage implements Storage {
     u.searchParams.set('X-Amz-Expires', String(expires))
     for (const [k, v] of Object.entries(query)) u.searchParams.set(k, v)
     const datetime = signedAt?.toISOString().replace(/[:-]|\.\d{3}/g, '')
-    const signed = await this.aws.sign(u.toString(), { method, headers, aws: { signQuery: true, datetime, allHeaders: !!headers } })
+    const aws = await this.signer(key)
+    const signed = await aws.sign(u.toString(), { method, headers, aws: { signQuery: true, datetime, allHeaders: !!headers } })
     return signed.url
   }
 
@@ -318,7 +327,7 @@ class S3Storage implements Storage {
   }
 
   async size(key: string) {
-    const res = await this.aws.fetch(this.url(key), { method: 'HEAD' })
+    const res = await this.request(key, this.url(key), { method: 'HEAD' })
     if (res.status === 404) return null
     if (!res.ok) throw new Error(`Storage HEAD failed (${res.status})`)
     return Number(res.headers.get('content-length') ?? 0)
@@ -326,7 +335,7 @@ class S3Storage implements Storage {
 
   async localCopy(key: string, scratch: string) {
     const file = path.join(scratch, `source${path.extname(key)}`)
-    const res = await this.aws.fetch(this.url(key))
+    const res = await this.request(key, this.url(key))
     if (!res.ok || !res.body) throw new Error(`Couldn’t download the original from storage (${res.status})`)
     await pipeline(Readable.fromWeb(res.body as never), createWriteStream(file))
     return file
@@ -343,7 +352,7 @@ class S3Storage implements Storage {
         await Promise.all(
           files.slice(i, i + 6).map(async (f) => {
             const key = `${prefix}/${path.relative(dir, f).split(path.sep).join('/')}`
-            const res = await this.aws.fetch(this.url(key), { method: 'PUT', body: await readFile(f), headers: { 'Content-Type': contentType(key) } })
+            const res = await this.request(key, this.url(key), { method: 'PUT', body: await readFile(f), headers: { 'Content-Type': contentType(key) } })
             if (!res.ok) throw new Error(`Couldn’t upload ${key} to storage (${res.status})`)
           }),
         )
@@ -361,7 +370,7 @@ class S3Storage implements Storage {
       const headers = new Headers()
       const range = req.headers.get('range')
       if (range) headers.set('range', range)
-      const response = await this.aws.fetch(this.url(key), { method: req.method, headers, signal: req.signal })
+      const response = await this.request(key, this.url(key), { method: req.method, headers, signal: req.signal })
       if (!response.ok && response.status !== 416) {
         await response.body?.cancel()
         return new Response(null, { status: response.status === 404 ? 404 : 502, headers: { 'Cache-Control': privateCache } })
@@ -379,7 +388,7 @@ class S3Storage implements Storage {
       // Playlists come through the app, with every segment rewritten to a signed bucket URL. Players then fetch
       // segments straight from the bucket with no redirects (Chrome's built-in HLS player won't follow a segment
       // redirect to another origin). Nested playlists stay relative, so they come back here and get signed too.
-      const res = await this.aws.fetch(this.url(key))
+      const res = await this.request(key, this.url(key))
       if (!res.ok) {
         await res.body?.cancel()
         return new Response(null, { status: res.status === 404 ? 404 : 502, headers: { 'Cache-Control': privateCache } })
@@ -412,12 +421,12 @@ class S3Storage implements Storage {
   }
 
   async putBuffer(key: string, data: Buffer, type: string) {
-    const res = await this.aws.fetch(this.url(key), { method: 'PUT', body: new Uint8Array(data), headers: { 'Content-Type': type } })
+    const res = await this.request(key, this.url(key), { method: 'PUT', body: new Uint8Array(data), headers: { 'Content-Type': type } })
     if (!res.ok) throw new Error(`Couldn’t store ${key} (${res.status})`)
   }
 
   async getBuffer(key: string) {
-    const res = await this.aws.fetch(this.url(key))
+    const res = await this.request(key, this.url(key))
     if (res.status === 404) return null
     if (!res.ok) throw new Error(`Couldn’t read ${key} from storage (${res.status})`)
     return Buffer.from(await res.arrayBuffer())
@@ -430,7 +439,7 @@ class S3Storage implements Storage {
   /* multipart: the bucket's own multipart upload. Browsers PUT parts straight to presigned URLs; the server lists
      what arrived (so browsers never need to read ETags, which buckets hide from CORS by default) and completes it. */
   async multipartStart(key: string) {
-    const res = await this.aws.fetch(`${this.url(key)}?uploads`, { method: 'POST', headers: { 'Content-Type': contentType(key) } })
+    const res = await this.request(key, `${this.url(key)}?uploads`, { method: 'POST', headers: { 'Content-Type': contentType(key) } })
     const id = /<UploadId>([^<]+)<\/UploadId>/.exec(await res.text())?.[1]
     if (!res.ok || !id) throw new Error(`Couldn’t start a multipart upload (${res.status})`)
     return id
@@ -445,7 +454,7 @@ class S3Storage implements Storage {
     const parts: StoredPart[] = []
     let marker = '0'
     for (let page = 0; page < 20; page++) {
-      const res = await this.aws.fetch(`${this.url(key)}?uploadId=${encodeURIComponent(uploadId)}&part-number-marker=${marker}&max-parts=1000`)
+      const res = await this.request(key, `${this.url(key)}?uploadId=${encodeURIComponent(uploadId)}&part-number-marker=${marker}&max-parts=1000`)
       if (res.status === 404) return []
       if (!res.ok) throw new Error(`Couldn’t list uploaded parts (${res.status})`)
       const xml = await res.text()
@@ -464,26 +473,26 @@ class S3Storage implements Storage {
     const body = `<CompleteMultipartUpload>${parts.map((p) => `<Part><PartNumber>${p.number}</PartNumber><ETag>${esc(p.etag)}</ETag></Part>`).join('')}</CompleteMultipartUpload>`
     const headers: Record<string, string> = { 'Content-Type': 'application/xml' }
     if (onlyIfMissing) headers['If-None-Match'] = '*'
-    const res = await this.aws.fetch(`${this.url(key)}?uploadId=${encodeURIComponent(uploadId)}`, { method: 'POST', body, headers })
+    const res = await this.request(key, `${this.url(key)}?uploadId=${encodeURIComponent(uploadId)}`, { method: 'POST', body, headers })
     const text = await res.text()
     // a 200 can still carry an <Error> (the bucket failed while joining)
     if (!res.ok || /<Error>/.test(text)) throw new Error(`Couldn’t join the uploaded parts (${res.status}): ${/<Message>([^<]*)/.exec(text)?.[1] ?? 'unknown error'}`)
   }
 
   async multipartAbort(key: string, uploadId: string) {
-    const res = await this.aws.fetch(`${this.url(key)}?uploadId=${encodeURIComponent(uploadId)}`, { method: 'DELETE' })
+    const res = await this.request(key, `${this.url(key)}?uploadId=${encodeURIComponent(uploadId)}`, { method: 'DELETE' })
     if (!res.ok && res.status !== 404) throw new Error(`Storage multipart abort failed (${res.status})`)
   }
 
   async remove(key: string) {
-    const res = await this.aws.fetch(this.url(key), { method: 'DELETE' })
+    const res = await this.request(key, this.url(key), { method: 'DELETE' })
     if (!res.ok && res.status !== 404) throw new Error(`Couldn’t delete ${key} (${res.status})`)
   }
 
   async removePrefix(prefix: string) {
     assertKey(prefix)
     for (let round = 0; round < 200; round++) {
-      const list = await this.aws.fetch(`${this.endpoint}/${this.bucket}?list-type=2&prefix=${encodeURIComponent(prefix + '/')}`)
+      const list = await this.request(prefix, `${this.endpoint}/${this.bucket}?list-type=2&prefix=${encodeURIComponent(prefix + '/')}`)
       if (!list.ok) throw new Error(`Storage list failed (${list.status})`)
       const xml = await list.text()
       if (!/<ListBucketResult[\s/>]/.test(xml)) throw new Error('Invalid bucket deletion inventory.')
@@ -514,7 +523,7 @@ class S3Storage implements Storage {
       url.searchParams.set('prefix', prefix + '/')
       url.searchParams.set('encoding-type', 'url')
       if (continuation) url.searchParams.set('continuation-token', continuation)
-      const res = await this.aws.fetch(url)
+      const res = await this.request(prefix, url)
       if (!res.ok) throw new Error(`Storage inventory failed (${res.status})`)
       const xml = await res.text()
       if (!/<ListBucketResult[\s>]/.test(xml)) throw new Error('Invalid bucket inventory response.')
@@ -533,7 +542,7 @@ class S3Storage implements Storage {
   }
 }
 
-const stores = new Map<Storage['kind'], Storage>()
+const stores = new Map<Storage['kind'] | 'vault', Storage>()
 
 // Identify assets written before per-asset routing exactly once, during migration.
 export function legacyStorageKind(env = process.env): Storage['kind'] {
@@ -549,30 +558,45 @@ export function newStorageKind(workspaceId: string, env = process.env): Storage[
   return enabled.includes(workspaceId) ? 's3' : 'local'
 }
 
-export function storage(asset?: { storageBackend: Storage['kind'] }): Storage {
+export function storage(asset?: { storageBackend: Storage['kind']; organizationId?: string }): Storage {
   const kind = asset ? asset.storageBackend : legacyStorageKind()
-  const existing = stores.get(kind)
+  const pilot = process.env.MEDIAEX_VAULT_WORKSPACE
+  const slot = kind === 's3' && pilot && asset?.organizationId === pilot ? 'vault' : kind
+  const existing = stores.get(slot)
   if (existing) return existing
   let store: Storage
   if (kind === 'local') {
     store = new LocalStorage(path.resolve(process.env.MEDIA_DIR || '.media'))
   } else if (kind === 's3') {
     const { S3_BUCKET, S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_SESSION_TOKEN } = process.env
-    if (!S3_BUCKET || !S3_ENDPOINT || !S3_ACCESS_KEY_ID || !S3_SECRET_ACCESS_KEY) {
+    if (!S3_BUCKET || !S3_ENDPOINT || (!pilot && (!S3_ACCESS_KEY_ID || !S3_SECRET_ACCESS_KEY))) {
       throw new Error('The S3 store for this asset is unavailable.')
     }
-    store = new S3Storage(S3_ENDPOINT.replace(/\/+$/, ''), S3_BUCKET, S3_REGION || 'auto', S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_SESSION_TOKEN)
+    const readPilot = slot === 'vault' ? workspaceSigner(new StorageVault('runtime')) : null
+    const shared = !readPilot && S3_ACCESS_KEY_ID && S3_SECRET_ACCESS_KEY
+      ? new AwsClient({ accessKeyId: S3_ACCESS_KEY_ID, secretAccessKey: S3_SECRET_ACCESS_KEY, sessionToken: S3_SESSION_TOKEN, service: 's3', region: S3_REGION || 'auto' })
+      : null
+    store = new S3Storage(S3_ENDPOINT.replace(/\/+$/, ''), S3_BUCKET, async key => {
+      const workspace = key.split('/', 1)[0]
+      if (readPilot) {
+        if (workspace !== pilot) throw new Error('Storage key belongs to another workspace.')
+        return readPilot()
+      }
+      if (workspace === pilot) throw new Error('Storage key belongs to another workspace.')
+      if (!shared) throw new Error('Storage credentials unavailable for this workspace.')
+      return shared
+    }, readPilot ? { redirect: 'error' } : undefined)
   } else {
     throw new Error('Unrecognized asset storage backend.')
   }
-  stores.set(kind, store)
+  stores.set(slot, store)
   return store
 }
 
 export function storageForWorkspace(workspaceId: string) {
-  return storage({ storageBackend: newStorageKind(workspaceId) })
+  return storage({ storageBackend: newStorageKind(workspaceId), organizationId: workspaceId })
 }
 
 export const isLocal = (s: Storage): s is LocalStorage => s.kind === 'local'
 export const isS3 = (s: Storage): s is S3Storage => s.kind === 's3'
-export type { LocalStorage, S3Storage }
+export type { LocalStorage }

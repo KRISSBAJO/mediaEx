@@ -1,0 +1,25 @@
+name: MediaEX storage vault pilot
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'scripts/test-storage-vault*'
+      - '.github/workflows/storage-vault.yml'
+permissions:
+  contents: read
+jobs:
+  rotate-and-recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - run: npm ci --prefix backend --no-audit --no-fund
+      - run: npm run build --prefix backend
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - run: node --experimental-strip-types scripts/test-storage-vault-offline.mts
+      - run: python3 scripts/test-storage-vault.py
