@@ -69,8 +69,7 @@ The API image ships Node.js, the PostgreSQL-backed account service and the media
 
 Generate each secret separately with `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. Store production values in service secrets. Register OAuth callbacks at `<BETTER_AUTH_URL>/api/auth/callback/google` or `<BETTER_AUTH_URL>/api/auth/callback/github`.
 
-Without `RESEND_API_KEY` in production, password-reset and invitation emails are skipped (a warning is logged), so set
-it before inviting real users.
+Production password resets require `RESEND_API_KEY` and a verified `MAIL_FROM` on the backend. If either is missing, the reset form reports that delivery is unavailable for every address. The API retries queued reset emails until their links expire.
 
 Container filesystems are wiped on every redeploy, so in production the backend **refuses uploads** (HTTP 503 with an
 explanation) until a bucket or a mounted `MEDIA_DIR` is configured; everything else keeps working. Browsers upload

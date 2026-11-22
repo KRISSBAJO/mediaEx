@@ -7,6 +7,8 @@ on:
       - 'components/admin/**'
       - 'lib/backend.ts'
       - 'scripts/test-storage-vault*'
+      - 'scripts/test-password-reset-delivery.mts'
+      - 'components/auth/ForgotForm.tsx'
       - '.github/workflows/storage-vault.yml'
 permissions:
   contents: read
@@ -44,6 +46,7 @@ jobs:
           export BETTER_AUTH_SECRET="$(openssl rand -hex 32)"
           node --experimental-strip-types backend/migrate.mts
           node --experimental-strip-types scripts/test-storage-vault-offline.mts
+          node --experimental-strip-types scripts/test-password-reset-delivery.mts
   rotate-and-recover:
     runs-on: ubuntu-24.04
     timeout-minutes: 35

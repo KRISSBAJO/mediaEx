@@ -11,6 +11,7 @@ import { RECOVERY_SCHEMA } from './media/recovery-schema.mts'
 import { PRESET_SCHEMA } from './media/preset-schema.mts'
 import { OPERATIONS_SCHEMA } from './media/operations-schema.mts'
 import { RETENTION_SCHEMA } from './media/retention-schema.mts'
+import { RESET_MAIL_SCHEMA } from './password-reset-mail.mts'
 import { migrateBackups } from './media/backup-schema.mts'
 
 if (!process.env.DATABASE_URL) {
@@ -26,6 +27,7 @@ if (!toBeCreated.length && !toBeAdded.length) {
   await runMigrations()
   console.log('[migrate] Done.')
 }
+await pool.query(RESET_MAIL_SCHEMA)
 await pool.query(MEDIA_SCHEMA)
 await migrateStorage(pool)
 await pool.query(RECOVERY_SCHEMA)
