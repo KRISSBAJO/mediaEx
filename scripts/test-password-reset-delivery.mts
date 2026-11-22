@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import { setTimeout as delay } from 'node:timers/promises'
 import { auth, baseURL, pool } from '../backend/auth.mts'
 import { deliverResetMail } from '../backend/password-reset-mail.mts'
 
@@ -18,11 +19,14 @@ const nativeFetch = globalThis.fetch
 try {
   assert.ok((await request('sign-up/email', {email,password:randomUUID(),name:'Reset fixture'})).ok)
   for (const address of [email, unknown]) assert.equal((await reset(address)).status, 503)
+  // Keep the actual production reset rate limit for the second pair of requests.
+  await delay(61_000)
   process.env.RESEND_API_KEY = 'fixture-only'
   process.env.MAIL_FROM = 'MediaEX <test@example.test>'
   const known = await reset(email)
   const absent = await reset(unknown)
   assert.equal(known.status,200)
+  assert.equal(absent.status,200)
   assert.deepEqual(await known.json(), await absent.json())
   const row = await pool.query('select "verificationId" from password_reset_mail')
   assert.equal(row.rows.length, 1)
