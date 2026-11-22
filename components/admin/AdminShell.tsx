@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import Logo from '@/components/Logo'
 import { authClient } from '@/lib/auth-client'
 import Icon from '../app/Icon'
+import SideNav from '../app/SideNav'
 import { Avatar, Toaster } from '../app/ui'
 
 const NAV = [
@@ -14,8 +15,8 @@ const NAV = [
     items: [
       { href: '/admin', label: 'Overview', icon: 'overview' },
       { href: '/admin/users', label: 'Users', icon: 'users' },
-      { href: '/admin/workspaces', label: 'Workspaces', icon: 'layers' },
-      { href: '/admin/media', label: 'Media', icon: 'library' },
+      { href: '/admin/workspaces', label: 'Workspaces', icon: 'building' },
+      { href: '/admin/media', label: 'Media', icon: 'film' },
     ],
   },
   {
@@ -25,9 +26,9 @@ const NAV = [
   {
     group: 'Run',
     items: [
-      { href: '/admin/operations', label: 'Operations', icon: 'analytics' },
-      { href: '/admin/audit', label: 'Audit log', icon: 'clock' },
-      { href: '/admin/admins', label: 'Admins', icon: 'key' },
+      { href: '/admin/operations', label: 'Operations', icon: 'pulse' },
+      { href: '/admin/audit', label: 'Audit log', icon: 'audit' },
+      { href: '/admin/admins', label: 'Admins', icon: 'shield' },
     ],
   },
 ]
@@ -47,41 +48,39 @@ export default function AdminShell({ admin, children }: { admin: { name: string;
     <div className={`app is-admin ${drawer ? 'drawer-open' : ''}`}>
       <aside className="side" aria-label="Site admin">
         <div className="side-inner">
-          <Link href="/admin" className="brand side-brand admin-brand">
-            <Logo size={19} />
-            <span className="admin-tag">Admin</span>
-          </Link>
-          <nav className="side-nav" aria-label="Site admin">
-            {NAV.map((g) => (
-              <div key={g.group} className="side-group">
-                <span className="side-label">{g.group}</span>
-                {g.items.map((it) => (
-                  <Link key={it.href} href={it.href} className={active(path, it.href) ? 'is-active' : ''} aria-current={active(path, it.href) ? 'page' : undefined}>
-                    <Icon name={it.icon} />
-                    {it.label}
-                  </Link>
-                ))}
-              </div>
-            ))}
-            <div className="side-group">
-              <span className="side-label">You</span>
-              <Link href="/dashboard">
-                <Icon name="external" />
-                My dashboard
-              </Link>
-            </div>
-          </nav>
+          <div className="side-head">
+            <Link href="/admin" className="brand side-brand">
+              <Logo size={19} />
+            </Link>
+            <span className="admin-tag">
+              <Icon name="shield" size={12} />
+              Admin
+            </span>
+          </div>
+          <div className="admin-banner">
+            <span className="admin-banner-dot" aria-hidden="true" />
+            <span>
+              <b>Site admin</b>
+              <em>Changes affect every workspace</em>
+            </span>
+          </div>
+          <SideNav label="Site admin" groups={NAV} isActive={(href) => active(path, href)} />
           <div className="side-foot">
+            <Link href="/dashboard" className="admin-back">
+              <Icon name="arrowLeft" size={15} />
+              My dashboard
+            </Link>
             <div className="admin-me">
               <Avatar initials={initials} size={30} />
-              <span>
+              <span className="ws-text">
                 <b>{admin.name}</b>
-                <small>{admin.email}</small>
+                <em>{admin.email}</em>
               </span>
               <button
                 type="button"
                 className="icon-btn"
                 aria-label="Sign out"
+                title="Sign out"
                 onClick={async () => {
                   await authClient.signOut()
                   router.replace('/sign-in')
