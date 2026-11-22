@@ -24,11 +24,12 @@ export const pool = (globalThis.__mxPool ??= new pg.Pool({ connectionString: pro
 type Mail = { to: string; subject: string; text: string; link?: string }
 
 /** Sends through Resend when RESEND_API_KEY is set; otherwise writes to the local dev mailbox (see /dev/mailbox). */
-export async function sendEmail(mail: Mail) {
-  if (mailEnabled) {
+export async function sendEmail(mail: Mail, idempotencyKey?: string) {
+  if (process.env.RESEND_API_KEY?.trim()) {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json', ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}) },
+      signal: AbortSignal.timeout(12000),
       body: JSON.stringify({ from: process.env.MAIL_FROM ?? 'MediaEX <onboarding@resend.dev>', to: mail.to, subject: mail.subject, text: mail.text }),
     })
     if (!res.ok) throw new Error(`Email provider rejected the message (${res.status})`)
@@ -120,7 +121,16 @@ export const auth = betterAuth({
     requireEmailVerification: mailEnabled,
     autoSignIn: !mailEnabled,
     revokeSessionsOnPasswordReset: true,
-    sendResetPassword: async ({ user, url }) => {
+    sendResetPassword: async ({ user, url, token }) => {
+      if (process.env.NODE_ENV === 'production') {
+        // Queue only a reference to the expiring verification row. The worker resolves the recipient at send time.
+        const result = await pool.query(
+          'insert into password_reset_mail ("verificationId", callback) select id, $2 from verification where identifier = $1 and value = $3 on conflict do nothing',
+          ['reset-password:' + token, new URL(url).searchParams.get('callbackURL') ?? '', user.id],
+        )
+        if (!result.rowCount) throw new Error('Could not queue password reset.')
+        return
+      }
       await sendEmail({
         to: user.email,
         subject: 'Reset your MediaEX password',
@@ -149,6 +159,10 @@ export const auth = betterAuth({
   },
   hooks: {
     before: createAuthMiddleware(async ctx => {
+      if (ctx.path === '/request-password-reset' && process.env.NODE_ENV === 'production' &&
+          (!process.env.RESEND_API_KEY?.trim() || !process.env.MAIL_FROM?.trim())) {
+        throw APIError.fromStatus('SERVICE_UNAVAILABLE', { message: 'Password reset email is temporarily unavailable. Please try again later.' })
+      }
       if (!ctx.path.startsWith('/admin/') || ctx.path === '/admin/stop-impersonating') return
       const current = await getSessionFromCtx<{role?: string | null}, {impersonatedBy?: string | null}>(ctx, { disableCookieCache: true })
       if (!current) throw APIError.fromStatus('UNAUTHORIZED', { message: 'Sign in to continue.' })

@@ -18,11 +18,18 @@ export default function ForgotForm() {
     setError(undefined)
     setFormError('')
     setLoading(true)
-    const { error: err } = await authClient.requestPasswordReset({ email: email.trim(), redirectTo: '/reset-password' })
-    setLoading(false)
-    // same answer whether or not the account exists, so the form can't be used to probe for emails
-    if (err && err.status === 429) return setFormError('Too many attempts. Wait a minute and try again.')
-    setSentTo(email.trim())
+    try {
+      const { error: err } = await authClient.requestPasswordReset({ email: email.trim(), redirectTo: '/reset-password' })
+      if (err) {
+        setFormError(err.status === 429 ? 'Too many attempts. Wait a minute and try again.' : 'Password reset email is temporarily unavailable. Please try again later.')
+        return
+      }
+      setSentTo(email.trim())
+    } catch {
+      setFormError('Could not reach MediaEX. Check your connection and try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -39,7 +46,7 @@ export default function ForgotForm() {
             title="Check your inbox"
             sub={
               <>
-                If an account exists for <b>{sentTo}</b>, you&apos;ll get a reset link in a minute. It expires in an hour.
+                If an account exists for <b>{sentTo}</b>, we&apos;ll send a reset link. It expires one hour after your request.
               </>
             }
           />

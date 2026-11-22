@@ -9,6 +9,7 @@ import { storage } from './media/storage.mts'
 import { startWorker } from './media/worker.mts'
 import { startCaptioner } from './media/captions.mts'
 import { handleAdmin } from './admin.mts'
+import { startResetMail } from './password-reset-mail.mts'
 import { startDispatcher } from './media/webhooks.mts'
 import { startOperationsMaintenance } from './media/maintenance.mts'
 import { startBackups } from './media/backup.mts'
@@ -128,6 +129,7 @@ const server = createServer((req, res) => {
 server.listen(port, '0.0.0.0', () => {
   console.log(`MediaEX backend listening on port ${port}`)
   if (operatorOnly) return
+  startResetMail()
   const kind = storage().kind
   console.log(`MediaEX media storage: ${kind === 's3' ? 'S3-compatible bucket' : 'local disk'}${isDurable() ? '' : ' (not durable: set S3_* or mount MEDIA_DIR)'}`)
   // the media pipeline worker shares this process; MEDIA_WORKER=off runs an API-only instance
