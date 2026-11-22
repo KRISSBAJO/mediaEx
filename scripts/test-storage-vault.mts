@@ -35,13 +35,17 @@ async function startMultipartProof() {
       method: 'PUT', headers: target.headers, body: bytes, redirect: 'error', signal: AbortSignal.timeout(30000),
     })
     assert.equal(response.status, 200, 'Multipart part upload failed')
+    const etag = response.headers.get('etag')
+    assert.ok(etag, 'Provider must return the stored part ETag')
+    return etag
   }
-  await send(await store.partTarget(key, id, 1, 'continuity', first.length), first)
+  const firstETag = await send(await store.partTarget(key, id, 1, 'continuity', first.length), first)
   const preissued = await store.partTarget(key, id, 2, 'continuity', last.length)
   return async () => {
-    await send(preissued, last)
+    const lastETag = await send(preissued, last)
     const parts = await store.listParts(key, id)
     assert.deepEqual(parts.map(p => [p.number, p.size]), [[1, first.length], [2, last.length]])
+    assert.deepEqual(parts.map(p => p.etag), [firstETag, lastETag])
     await store.multipartComplete(key, id, parts)
     const url = await store.readableUrl(key)
     signedBy(url, keys[1])

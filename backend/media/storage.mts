@@ -460,7 +460,13 @@ export class S3Storage implements Storage {
       const xml = await res.text()
       for (const m of xml.matchAll(/<Part>([\s\S]*?)<\/Part>/g)) {
         const get = (tag: string) => new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(m[1])?.[1] ?? ''
-        parts.push({ number: Number(get('PartNumber')), size: Number(get('Size')), etag: get('ETag').replace(/&quot;/g, '"') })
+        // Go XML encoders use &#34; for quotes. Decode XML text once before re-encoding it for CompleteMultipartUpload.
+        const etag = get('ETag').replace(/&(quot|apos|amp|lt|gt|#\d+|#x[\da-fA-F]+);/g, (_, entity: string) => {
+          const named: Record<string, string> = { quot: '"', apos: "'", amp: '&', lt: '<', gt: '>' }
+          if (!entity.startsWith('#')) return named[entity]
+          return String.fromCodePoint(entity.startsWith('#x') ? parseInt(entity.slice(2), 16) : Number(entity.slice(1)))
+        })
+        parts.push({ number: Number(get('PartNumber')), size: Number(get('Size')), etag })
       }
       if (!/<IsTruncated>true<\/IsTruncated>/.test(xml)) break
       marker = /<NextPartNumberMarker>(\d+)<\/NextPartNumberMarker>/.exec(xml)?.[1] ?? marker
