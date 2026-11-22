@@ -77,7 +77,8 @@ def start_bao(name, folder):
     config = folder / "bao.hcl"
     config.write_text('disable_mlock = true\napi_addr = "http://127.0.0.1:8200"\ncluster_addr = "https://127.0.0.1:8201"\n'
                       'listener "tcp" {\n address = "0.0.0.0:8200"\n tls_disable = true\n}\n'
-                      'storage "raft" {\n path = "/tmp/raft"\n node_id = "fixture"\n}\n')
+                      'storage "raft" {\n path = "/tmp/raft"\n node_id = "fixture"\n}\n'
+                      'audit "file" "pilot" {\n options {\n file_path = "/tmp/pilot-audit.jsonl"\n }\n}\n')
     run(["docker", "run", "-d", "--name", name, "-p", "127.0.0.1::8200", "--user", "0", "--tmpfs", "/tmp/raft:mode=0700",
          "-v", f"{config}:/tmp/pilot.hcl:ro", "--entrypoint", "bao", BAO, "server", "-config=/tmp/pilot.hcl"])
     addr = port(name, 8200)
@@ -133,7 +134,6 @@ def main(folder):
         for k in keys:
             mc("admin", "user", "add", "test", k["accessKeyId"], k["secretAccessKey"])
             mc("admin", "policy", "attach", "test", "studio-a", "--user", k["accessKeyId"])
-        ok(addr, "sys/audit/pilot", root, {"type": "file", "options": {"file_path": "/tmp/pilot-audit.jsonl"}})
         ok(addr, "sys/mounts/mediaex", root, {"type": "kv", "options": {"version": "2"}})
         ok(addr, "mediaex/config", root, {"cas_required": True, "max_versions": 20})
         runtime = token(addr, root, "pilot-reader", ["read"], "pilot-runtime")
