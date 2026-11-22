@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import Icon from '../../app/Icon'
 import { Card, PageHead, StatTile } from '../../app/ui'
+import StorageCredential, { type CredentialStatus } from './StorageCredential'
 import { AuditList, Back, Confirm, Loading, Pill, PlanPill, act, day, fmtBytes, useAdmin, when, type AuditEntry } from '../kit'
 
 type Detail = {
@@ -33,16 +34,25 @@ type Detail = {
   developer: { keys: number; webhooks: number }
   settings: { moderationMode: string; aiReview: boolean; extraCodecs: string[]; autoCaptions: boolean } | null
   audit: AuditEntry[]
+  storageCredential: CredentialStatus | null
 }
 
-export default function AdminWorkspace({ id }: { id: string }) {
+export default function AdminWorkspace({ id, operatorConnected }: { id: string; operatorConnected: boolean }) {
   const router = useRouter()
-  const { data, error, setData } = useAdmin<Detail>(`/api/admin/workspaces/${id}`)
+  const { data, error, setData, reload } = useAdmin<Detail>(`/api/admin/workspaces/${id}`)
+  const operator = useAdmin<CredentialStatus>(operatorConnected ? `/api/admin/workspaces/${id}/storage-credential` : null)
   const [dialog, setDialog] = useState<'suspend' | 'delete' | 'plan' | null>(null)
   const [plan, setPlan] = useState('pro')
   const [until, setUntil] = useState('')
   const [note, setNote] = useState<string | null>(null)
   if (!data) return <Loading error={error} />
+  const credential = operatorConnected
+    ? operator.error ? { state: 'unavailable' as const } : operator.data
+    : data.storageCredential
+  const refreshCredential = () => {
+    if (operatorConnected) operator.reload()
+    reload()
+  }
   const w = data.workspace
   const run = async (action: string, json?: unknown, done?: string) => {
     const r = await act<Detail>(`/api/admin/workspaces/${id}/${action}`, { json, done })
@@ -161,6 +171,7 @@ export default function AdminWorkspace({ id }: { id: string }) {
           </Card>
         </div>
         <div className="stack">
+          {credential && <StorageCredential workspace={id} status={credential} connected={operatorConnected} refresh={refreshCredential} />}
           <Card title="Billing">
             <dl className="details">
               <div>

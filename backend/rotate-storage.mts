@@ -69,15 +69,20 @@ export async function proveMedia(vault: StorageVault, key: StorageKey) {
   }
 }
 
-export async function rotate(vault: StorageVault, expected: number, key: StorageKey, prove = proveMedia) {
+export async function verifyReplacement(vault: StorageVault, expected: number, key: StorageKey) {
   if (!Number.isSafeInteger(expected) || expected < 0) throw new Error('A nonnegative expected version is required.')
   const old = await vault.current()
   if ((old?.version ?? 0) !== expected) throw new Error('The active version changed. Read status before retrying.')
   if (old?.record.key.accessKeyId === key.accessKeyId) throw new Error('Supply a distinct replacement key.')
   const actor = await vault.actor()
-  await prove(vault, key)
+  await proveMedia(vault, key)
+  return actor
+}
+
+export async function rotate(vault: StorageVault, expected: number, key: StorageKey, performedBy?: { id: string; name: string }) {
+  const actor = await verifyReplacement(vault, expected, key)
   const now = Date.now()
-  const proof = { actor, checkedAt: new Date(now).toISOString(), previousVersion: expected,
+  const proof = { actor, ...(performedBy && { performedBy }), checkedAt: new Date(now).toISOString(), previousVersion: expected,
     earliestRetirement: expected ? new Date(now + (24 * 60 + 5) * 60000).toISOString() : null }
   const version = await vault.activate(expected, key, proof)
   return { version, ...proof }

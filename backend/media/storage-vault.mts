@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { AwsClient } from 'aws4fetch'
 
 export type StorageKey = { accessKeyId: string; secretAccessKey: string; sessionToken?: string }
-export type Proof = { actor: string; checkedAt: string; previousVersion: number; earliestRetirement: string | null }
+export type Proof = { actor: string; checkedAt: string; previousVersion: number; earliestRetirement: string | null; performedBy?: { id: string; name: string } }
 type Binding = { workspace: string; endpoint: string; bucket: string; region: string }
 type RecordData = { binding: Binding; key: StorageKey; proof: Proof }
 type Version = { version: number; record: RecordData }
@@ -94,13 +94,13 @@ export function workspaceSigner(vault: StorageVault) {
   }
 }
 
-export async function vaultStatus(orgId: string, role: string) {
+export async function vaultStatus(orgId: string, role: string, identity: 'runtime' | 'operator' = 'runtime') {
   if (orgId !== process.env.MEDIAEX_VAULT_WORKSPACE || !['owner', 'admin'].includes(role)) return null
   try {
-    const active = await new StorageVault('runtime').current()
+    const active = await new StorageVault(identity).current()
     if (!active) return { state: 'unconfigured' as const }
-    const { actor, checkedAt, previousVersion, earliestRetirement } = active.record.proof
-    return { state: 'active' as const, version: active.version, actor, checkedAt, previousVersion, earliestRetirement }
+    const { actor, performedBy, checkedAt, previousVersion, earliestRetirement } = active.record.proof
+    return { state: 'active' as const, version: active.version, actor: performedBy?.name || actor, checkedAt, previousVersion, earliestRetirement }
   } catch {
     return { state: 'unavailable' as const }
   }

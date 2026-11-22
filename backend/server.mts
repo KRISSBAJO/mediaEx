@@ -14,7 +14,11 @@ import { startOperationsMaintenance } from './media/maintenance.mts'
 import { startBackups } from './media/backup.mts'
 
 const frontend = new URL(baseURL)
+const operatorOnly = process.env.MEDIAEX_PROCESS_ROLE === 'storage-operator'
 const serviceToken = process.env.MEDIAEX_API_TOKEN
+if (operatorOnly && (!serviceToken || serviceToken.length < 32 || !process.env.MEDIAEX_VAULT_OPERATOR_TOKEN_FILE || !process.env.MEDIAEX_VAULT_WORKSPACE)) {
+  throw new Error('Configure the dedicated operator service identity and pilot workspace before starting.')
+}
 if (process.env.NODE_ENV === 'production') {
   for (const name of ['DATABASE_URL', 'BETTER_AUTH_URL', 'BETTER_AUTH_SECRET', 'MEDIAEX_API_TOKEN']) {
     if (!process.env[name]) throw new Error(`Missing required backend setting ${name}`)
@@ -79,6 +83,8 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     }
   }
   if (!pathname.startsWith('/api/')) return json(res, 404, { error: 'Not found' })
+  const credentialRoute = /^\/api\/admin\/workspaces\/[A-Za-z0-9_-]+\/storage-credential$/.test(pathname)
+  if (operatorOnly !== credentialRoute) return json(res, 404, { error: 'Not found' })
   const supplied = req.headers['x-mediaex-service-token']
   if (expectedToken && (typeof supplied !== 'string' || !timingSafeEqual(expectedToken, digest(supplied)))) {
     return json(res, 403, { error: 'Forbidden' })
@@ -121,6 +127,7 @@ const server = createServer((req, res) => {
 })
 server.listen(port, '0.0.0.0', () => {
   console.log(`MediaEX backend listening on port ${port}`)
+  if (operatorOnly) return
   const kind = storage().kind
   console.log(`MediaEX media storage: ${kind === 's3' ? 'S3-compatible bucket' : 'local disk'}${isDurable() ? '' : ' (not durable: set S3_* or mount MEDIA_DIR)'}`)
   // the media pipeline worker shares this process; MEDIA_WORKER=off runs an API-only instance
