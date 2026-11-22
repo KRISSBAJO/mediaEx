@@ -199,6 +199,19 @@ def main(folder):
              "import { proveMedia } from './backend/rotate-storage.mts'; "
              "const vault = new StorageVault('runtime'); await proveMedia(vault, (await vault.current()).record.key)"], env=env)
         print("Passed restore of version 2, workspace policy and media proof on a fresh OpenBao node with source offline.", flush=True)
+
+        phase = "authenticated video rotation and restore"
+        env.update(BACKUP_DIR=str(folder / "backup"), MEDIA_DIR=str(folder / "media"))
+        drill = subprocess.run(["node", "--experimental-strip-types", "scripts/test-storage-vault-recovery.mts", str(folder)],
+                               cwd=REPO, env=env, capture_output=True, timeout=220)
+        for line in drill.stdout.decode(errors="replace").splitlines():
+            if line.startswith("Passed "):
+                print(line, flush=True)
+        if drill.returncode:
+            diagnostic = next((line for line in drill.stderr.decode(errors="replace").splitlines()
+                               if line.startswith("Recovery drill failed during ")), "test process exited")
+            raise RuntimeError(diagnostic)
+
     finally:
         # These random names belong only to this invocation.
         for name in (recovered, source, bucket_host):
