@@ -27,6 +27,7 @@ function Report({ data }: { data: OperationsReport }) {
     ['Retained previous versions', data.versionBytes],
   ] as const
   const total = storage.reduce((sum, [, value]) => sum + value, 0)
+  const credential = data.storageCredential
   return <>
     <div className="grid-ruled stat-tiles">
       <StatTile label="Tracked media storage" value={bytes(total)} />
@@ -34,6 +35,12 @@ function Report({ data }: { data: OperationsReport }) {
       <StatTile label="Processed media · 30 days" value={data.processingMinutes.toLocaleString(undefined, { maximumFractionDigits: 2 })} unit="min" />
       <StatTile label="Player delivery · 30 days" value={bytes(data.playerBytes)} />
     </div>
+    {credential && <Card title="Storage credential" meta={credential.state === 'active' ? 'Version ' + credential.version : 'OpenBao'}>
+      {credential.state === 'active' ? <>
+        <p>{credential.actor} verified upload, encoding and playback on {new Date(credential.checkedAt).toLocaleString()}.</p>
+        {credential.earliestRetirement && <p>Keep the key for version {credential.previousVersion} active until at least {new Date(credential.earliestRetirement).toLocaleString()}. Check in-flight work before retiring it.</p>}
+      </> : <p>{credential.state === 'unavailable' ? 'Credential status is unavailable.' : 'Waiting for the first verified storage credential.'}</p>}
+    </Card>}
     <div className="grid-2 even">
       <Card title="Storage breakdown" meta="Includes files retained in Trash" flush>
         <div className="table-wrap"><table className="table">

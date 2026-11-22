@@ -264,7 +264,7 @@ async function removeCopies(db: PoolClient, row: { id: string; organizationId: s
       if (receipt.prefix !== prefix || receipt.organizationId !== row.organizationId) throw new Error('Transfer receipt differs from the stored version.')
       copies.delete(version.revisionId)
       const counterpart = version.storageBackend === 'local' ? 's3' : 'local'
-      plan.push({ prefix, version, store: storage({ storageBackend: counterpart }) })
+      plan.push({ prefix, version, store: storage({ storageBackend: counterpart, organizationId: version.organizationId }) })
     }
   }
   if (copies.size) throw new Error('Transfer receipt has no matching retained version.')
