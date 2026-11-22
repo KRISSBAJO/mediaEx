@@ -11,8 +11,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 BAO = "ghcr.io/openbao/openbao:2.7.3"
-MINIO = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
-MC = "quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z"
+MINIO = "minio/minio:RELEASE.2025-09-07T16-13-09Z"
+MC = "minio/mc:RELEASE.2025-08-13T08-35-41Z"
 REPO = Path(__file__).resolve().parents[1]
 VAULT_PATH = "mediaex/data/workspaces/studio-a/storage"
 
@@ -89,6 +89,9 @@ def main(folder):
     keys = [{"accessKeyId": "key" + secrets.token_hex(6), "secretAccessKey": secrets.token_hex(24)} for _ in range(2)]
     sensitive = [k["secretAccessKey"] for k in keys]
     try:
+        phase = "pulling the public fixture images"
+        for image in (BAO, MINIO, MC):
+            subprocess.run(["docker", "pull", image], check=True, timeout=180)
         phase = "starting OpenBao and MinIO"
         addr, init = start_bao(source, folder)
         root = init["root_token"]
