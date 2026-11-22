@@ -43,6 +43,13 @@ const PATHS: Record<string, string> = {
   captions: 'M3 5h18v14H3zM7 11h4M7 15h7M13 11h4M16 15h1',
   refresh: 'M20 11a8 8 0 0 0-14.9-3M4 5v3h3M4 13a8 8 0 0 0 14.9 3M20 19v-3h-3',
   file: 'M14 3H6v18h12V7l-4-4ZM14 3v4h4',
+  shield: 'M12 3 4.5 6v5.5c0 4.6 3.2 8.3 7.5 9.5 4.3-1.2 7.5-4.9 7.5-9.5V6L12 3Z',
+  shieldCheck: 'M12 3 4.5 6v5.5c0 4.6 3.2 8.3 7.5 9.5 4.3-1.2 7.5-4.9 7.5-9.5V6L12 3ZM9 12l2 2 4-4',
+  building: 'M4 21V5.5L12 3v18M12 8h8v13M7.5 8h1M7.5 12h1M7.5 16h1M15.5 12h1M15.5 16h1M2 21h20',
+  pulse: 'M3 12h4l2.5-6 5 12 2.5-6H21',
+  audit: 'M6 3h9l4 4v14H6zM9.5 10h6M9.5 14h6M9.5 18h3',
+  film: 'M4 4h16v16H4zM8 4v16M16 4v16M4 8h4M4 12h4M4 16h4M16 8h4M16 12h4M16 16h4',
+  gauge: 'M12 14l4-4M3.5 17a9 9 0 1 1 17 0',
 }
 
 export type IconName = keyof typeof PATHS

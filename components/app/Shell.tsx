@@ -11,6 +11,7 @@ import { AccountProvider, useAccount, type Account } from './account'
 import { LibraryProvider, useLibrary } from './library'
 import { MediaProvider, useMedia } from './media'
 import Icon from './Icon'
+import SideNav, { wsHue } from './SideNav'
 import { Avatar, Meter, Toaster, toast } from './ui'
 
 
@@ -22,9 +23,9 @@ const NAV = [
       { href: '/dashboard/library', label: 'Library', icon: 'library' },
       { href: '/dashboard/uploads', label: 'Uploads', icon: 'upload' },
       { href: '/dashboard/trash', label: 'Trash', icon: 'trash' },
-      { href: '/dashboard/review', label: 'Review', icon: 'check' },
+      { href: '/dashboard/review', label: 'Review', icon: 'shieldCheck' },
       { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics' },
-      { href: '/dashboard/usage', label: 'Usage and errors', icon: 'layers' },
+      { href: '/dashboard/usage', label: 'Usage and errors', icon: 'gauge' },
     ],
   },
   {
@@ -99,7 +100,7 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
 
       <div className="menu-wrap" ref={wsRef}>
         <button type="button" className="ws" aria-haspopup="menu" aria-expanded={ws} onClick={() => setWs((o) => !o)}>
-          <span className="ws-mark">{workspace.initial}</span>
+          <span className="ws-mark" style={{ '--h': wsHue(workspace.id) } as React.CSSProperties}>{workspace.initial}</span>
           <span className="ws-text">
             <b>{workspace.name}</b>
             <em>{busy ? 'Switching…' : `${workspace.role[0].toUpperCase()}${workspace.role.slice(1)} · ${workspace.plan.name}`}</em>
@@ -111,7 +112,7 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
             <span className="menu-label">Workspaces</span>
             {workspaces.map((w) => (
               <button key={w.id} type="button" role="menuitem" onClick={() => switchTo(w.id)}>
-                <span className="ws-mark sm">{w.initial}</span>
+                <span className="ws-mark sm" style={{ '--h': wsHue(w.id) } as React.CSSProperties}>{w.initial}</span>
                 {w.name}
                 {w.id === workspace.id && <Icon name="check" size={15} className="menu-check" />}
               </button>
@@ -124,46 +125,28 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
         )}
       </div>
 
-      <nav className="side-nav" aria-label="Dashboard">
-        {NAV.map((g) => (
-          <div key={g.group} className="side-group">
-            <span className="side-label">{g.group}</span>
-            {g.items.map((it) => (
-              <Link
-                key={it.href}
-                href={it.href}
-                className={isActive(path, it.href) ? 'is-active' : ''}
-                aria-current={isActive(path, it.href) ? 'page' : undefined}
-                onClick={onNavigate}
-              >
-                <Icon name={it.icon} />
-                {it.label}
-                {counts[it.href] ? <em>{counts[it.href]}</em> : null}
-              </Link>
-            ))}
-          </div>
-        ))}
-        <div className="side-group">
-          <span className="side-label">Resources</span>
-          <Link href="/#developers" onClick={onNavigate}>
-            <Icon name="book" />
-            API overview
-            <Icon name="external" size={13} className="side-ext" />
-          </Link>
-        </div>
-      </nav>
+      <SideNav
+        label="Dashboard"
+        onNavigate={onNavigate}
+        isActive={(href) => isActive(path, href)}
+        groups={[
+          ...NAV.map((g) => ({ ...g, items: g.items.map((it) => ({ ...it, count: counts[it.href] })) })),
+          { group: 'Resources', items: [{ href: '/#developers', label: 'API overview', icon: 'book', external: true }] },
+        ]}
+      />
 
       <div className="side-foot">
         <div className="usage">
           <div className="usage-row">
             <span>Storage</span>
             <b>
-              {used ? bytes(used) : '0 GB'} / {bytes(workspace.plan.storageLimit)}
+              {used ? bytes(used) : '0 GB'} <i>of {bytes(workspace.plan.storageLimit)}</i>
             </b>
           </div>
           <Meter value={used} max={workspace.plan.storageLimit} />
           <Link href="/dashboard/settings?tab=billing" className="usage-link" onClick={onNavigate}>
-            Manage plan <Icon name="arrowRight" size={13} />
+            <span className="usage-plan">{workspace.plan.name}</span>
+            {workspace.plan.id === 'studio' ? 'Manage plan' : 'Upgrade'} <Icon name="arrowRight" size={13} />
           </Link>
         </div>
 
@@ -174,7 +157,7 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
               <b>{user.name}</b>
               <em>{user.email}</em>
             </span>
-            <Icon name="more" size={16} />
+            <Icon name="updown" size={15} />
           </button>
           {me && (
             <div className="menu menu-up" role="menu">
@@ -186,7 +169,7 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
               </Link>
               {user.isAdmin && (
                 <Link href="/admin" role="menuitem" onClick={() => setMe(false)}>
-                  <Icon name="key" size={15} /> Site admin
+                  <Icon name="shield" size={15} /> Site admin
                 </Link>
               )}
               <hr />
