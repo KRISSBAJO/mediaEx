@@ -1,0 +1,65 @@
+name: Check the MediaEX pilot upload route
+
+on:
+  push:
+    branches: [diagnostics/mediaex-upload-route-20261123]
+
+permissions: {}
+
+jobs:
+  public-api:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Check homepage, backend readiness, and API responses without credentials
+        shell: python
+        run: |
+          import json
+          import sys
+          from urllib.error import HTTPError, URLError
+          from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          frontend = "https://owner-mediaex-xs7qr.test.hoiststack.com"
+          backend = "https://owner-mediaex-backend-u61z3.test.hoiststack.com"
+          probes = [
+              ("website", frontend + "/", "GET", 200, "text/html"),
+              ("readiness", backend + "/readyz", "GET", 200, "application/json"),
+              ("dashboard API", frontend + "/api/assets", "GET", 401, "application/json"),
+              ("public API identity", frontend + "/api/v1/whoami", "GET", 401, "application/json"),
+              ("public upload", frontend + "/api/v1/uploads", "POST", 401, "application/json"),
+          ]
+          opener = build_opener(NoRedirect())
+          failed = False
+          for label, url, method, expected, expected_type in probes:
+              data = b"{}" if method == "POST" else None
+              request = Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+              try:
+                  try:
+                      response = opener.open(request, timeout=12)
+                  except HTTPError as error:
+                      response = error
+                  with response:
+                      status = response.status
+                      mime = response.headers.get_content_type()
+                      body = response.read(2048)
+                  try:
+                      payload = json.loads(body)
+                  except (ValueError, UnicodeError):
+                      payload = {}
+                  key_challenge = isinstance(payload, dict) and "Send your API key" in str(payload.get("error", ""))
+                  plain_404 = body.strip() == b"404 page not found"
+                  ok = status == expected and mime == expected_type
+                  if label in ("public API identity", "public upload"):
+                      ok = ok and key_challenge
+                  if label == "readiness":
+                      ok = ok and isinstance(payload, dict) and payload.get("status") == "ready"
+                  print(f"{label}: HTTP {status}, {mime}, MediaEX key challenge={key_challenge}, plain 404={plain_404}, pass={ok}")
+                  failed |= not ok
+              except (URLError, OSError) as error:
+                  print(f"{label}: connection failed ({error})")
+                  failed = True
+          sys.exit(int(failed))
