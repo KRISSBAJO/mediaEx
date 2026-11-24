@@ -4207,11 +4207,218 @@ button.asset-cell:hover b {
 .dev-log-actions {
   gap: 8px;
 }
-.dev-quick .tabs {
-  margin-bottom: 14px;
+/* developers: one section per tab, a main column and a quiet help column */
+.dev-tabs .tabs {
+  margin-bottom: 28px;
+}
+.dev-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 48px;
+  align-items: start;
+}
+.dev-aside {
+  position: sticky;
+  top: 88px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  justify-items: start;
+  padding: 2px 0 2px 28px;
+  border-left: 1px solid var(--line);
+}
+.dev-aside > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.dev-aside h2 {
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.dev-aside code {
+  font: 400 13px var(--font-code);
+  color: var(--text);
+  white-space: nowrap;
+}
+.dev-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  width: 100%;
+}
+.dev-field > span {
+  font-size: 13.5px;
+  color: var(--muted);
+}
+.dev-field > div {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 2px 2px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.dev-field code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dev-field .icon-btn {
+  width: 32px;
+  height: 32px;
+}
+.dev-key b,
+.dev-key small {
+  display: block;
+}
+.dev-key small {
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--dim);
+}
+.dev-notes,
+.dev-steps {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.dev-notes li {
+  position: relative;
+  padding-left: 16px;
+}
+.dev-notes li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.72em;
+  width: 5px;
+  height: 1px;
+  background: var(--dim);
+}
+.dev-steps {
+  gap: 16px;
+  counter-reset: dev-step;
+}
+.dev-steps li {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding-left: 34px;
+  counter-increment: dev-step;
+}
+.dev-steps li::before {
+  content: counter(dev-step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  font: 500 12px/1 var(--font-body);
+  color: var(--muted);
+}
+.dev-steps b {
+  font-weight: 500;
+  color: var(--text);
+}
+.dev-caution {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgb(245 165 36 / 0.25);
+  border-radius: 8px;
+  background: rgb(245 165 36 / 0.05);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.dev-caution svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--warn);
+}
+.dev-code {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.dev-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 42px;
+  padding: 0 6px 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--raise);
+}
+.dev-code-head > span {
+  font: 400 13px var(--font-code);
+  color: var(--dim);
+}
+.dev-code .snippet {
+  padding: 18px 16px;
+  border: 0;
+  border-radius: 0;
+}
+.dev-quick-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.dev-quick-bar p {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted);
 }
 .dev-quick .snippet {
-  min-height: 236px;
+  min-height: 300px;
+}
+@media (max-width: 1180px) {
+  .dev-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+  .dev-aside {
+    position: static;
+    padding: 28px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .dev-field {
+    max-width: 480px;
+  }
+}
+@media (max-width: 720px) {
+  .dev-quick-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .dev-quick-bar .seg {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .dev-quick .snippet {
+    min-height: 0;
+  }
 }
 .table.is-clickable tbody tr {
   cursor: pointer;

@@ -1,6 +1,6 @@
 'use client'
 
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
 import {
   KEY_SCOPE_LABEL,
@@ -17,7 +17,7 @@ import { canManage, useAccount } from '../account'
 import Icon from '../Icon'
 import { ConfirmDialog, Dialog } from '../library-ui/dialogs'
 import { Ago } from '../media'
-import { Card, PageHead, Tabs, copyText, toast } from '../ui'
+import { Card, PageHead, Segmented, Tabs, copyText, toast } from '../ui'
 
 const SCOPE_HELP: Record<KeyScope, string> = {
   read: 'List and read assets and folders.',
@@ -350,9 +350,55 @@ function DeliveryStatus({ d }: { d: WebhookDelivery }) {
   return <span className="dot-status is-warn">Retrying · {d.responseStatus ?? 'no answer'}</span>
 }
 
+/* ------------------------------------------------ shared pieces */
+type Section = 'keys' | 'webhooks' | 'playback' | 'quickstart'
+type Sample = 'list' | 'upload' | 'verify'
+const isSection = (v: string | null): v is Section => v === 'keys' || v === 'webhooks' || v === 'playback' || v === 'quickstart'
+
+/** A code block with its own title bar and copy button. */
+function Code({ label, text }: { label: string; text: string }) {
+  return (
+    <div className="dev-code">
+      <div className="dev-code-head">
+        <span>{label}</span>
+        <button type="button" className="btn btn-quiet btn-sm" onClick={() => copyText(text, 'Snippet copied')}>
+          <Icon name="copy" size={14} /> Copy
+        </button>
+      </div>
+      <pre className="snippet">
+        <code>{text}</code>
+      </pre>
+    </div>
+  )
+}
+
+/** A labelled value to copy (base URL, header). */
+function CopyField({ label, value, copied }: { label: string; value: string; copied: string }) {
+  return (
+    <div className="dev-field">
+      <span>{label}</span>
+      <div>
+        <code title={value}>{value}</code>
+        <button type="button" className="icon-btn is-quiet" aria-label={`Copy ${label.toLowerCase()}`} onClick={() => copyText(value, copied)}>
+          <Icon name="copy" size={15} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** The help column beside each section. */
+function Aside({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <aside className="dev-aside" aria-label={title}>
+      <h2>{title}</h2>
+      {children}
+    </aside>
+  )
+}
+
 /* ------------------------------------------------ code samples */
-function Quickstart({ origin }: { origin: string }) {
-  const [tab, setTab] = useState<'list' | 'upload' | 'verify'>('list')
+function Quickstart({ origin, sample, onSample }: { origin: string; sample: Sample; onSample: (s: Sample) => void }) {
   const api = `${origin}/api/v1`
   const samples = {
     list: `curl ${api}/assets?limit=10 \\
@@ -387,29 +433,27 @@ export function verifyMediaEX(rawBody, header, secret) {
 
 // verifyMediaEX(body, req.headers['mediaex-signature'], process.env.MEDIAEX_WEBHOOK_SECRET)`,
   }
+  const about: Record<Sample, { label: string; note: string }> = {
+    list: { label: 'Shell · curl', note: 'Lists the newest assets, then searches them the way the library does.' },
+    upload: { label: 'Shell · curl', note: 'An upload is three calls: start it, send the file, then mark it complete.' },
+    verify: { label: 'Node.js', note: 'Checks that a webhook really came from MediaEX and is not a replay.' },
+  }
   return (
-    <Card
-      title="Quickstart"
-      meta="Copy, paste, run"
-      className="dev-quick"
-      action={
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(samples[tab], 'Snippet copied')}>
-          <Icon name="copy" size={15} /> Copy
-        </button>
-      }
-    >
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { value: 'list', label: 'List assets' },
-          { value: 'upload', label: 'Upload' },
-          { value: 'verify', label: 'Verify webhooks' },
-        ]}
-      />
-      <pre className="snippet">
-        <code>{samples[tab]}</code>
-      </pre>
+    <Card title="Code samples" meta="Copy, paste, run" className="dev-quick">
+      <div className="dev-quick-bar">
+        <Segmented
+          label="Sample"
+          value={sample}
+          onChange={onSample}
+          options={[
+            { value: 'list', label: 'List assets' },
+            { value: 'upload', label: 'Upload a file' },
+            { value: 'verify', label: 'Verify webhooks' },
+          ]}
+        />
+        <p>{about[sample].note}</p>
+      </div>
+      <Code label={about[sample].label} text={samples[sample]} />
     </Card>
   )
 }
@@ -431,45 +475,67 @@ export function signedLink(assetId, secret, ttl = 3600) {
 // or ask the API for one:
 // POST ${origin}/api/v1/assets/:id/playback-token  { "expiresIn": 3600 }`
   return (
-    <Card
-      title="Playback signing"
-      meta="For assets set to signed links only"
-      action={
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(snippet, 'Snippet copied')}>
-          <Icon name="copy" size={15} /> Copy
-        </button>
-      }
-    >
-      <p className="access-note">
-        Sign links on your own server with this secret, so viewers get links that expire. The token also works on the stream URL (
-        <code>?token=</code>). Rotating the secret ends every link signed with the old one.
-      </p>
-      {manage &&
-        (secret ? (
-          <div className="copy-row dev-sign-row">
-            <code>{secret}</code>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(secret, 'Signing secret copied')}>
-              <Icon name="copy" size={15} /> Copy
-            </button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRotating(true)}>
-              Rotate
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm dev-sign-row"
-            onClick={async () => {
-              const r = await call<{ secret: string }>('/api/playback/secret')
-              if (r) setSecret(r.secret)
-            }}
-          >
-            <Icon name="lock" size={15} /> Reveal signing secret
-          </button>
-        ))}
-      <pre className="snippet">
-        <code>{snippet}</code>
-      </pre>
+    <div className="dev-layout">
+      <div className="stack">
+        <Card title="Signing secret" meta="One per workspace">
+          <p className="access-note">
+            Assets set to <b>signed links only</b> play only through links signed with this secret. Sign them on your own server, so viewers get links that expire.
+          </p>
+          {manage ? (
+            secret ? (
+              <div className="copy-row dev-sign-row">
+                <code>{secret}</code>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(secret, 'Signing secret copied')}>
+                  <Icon name="copy" size={15} /> Copy
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRotating(true)}>
+                  <Icon name="refresh" size={14} /> Rotate
+                </button>
+              </div>
+            ) : (
+              <div className="dev-sign-row">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={async () => {
+                    const r = await call<{ secret: string }>('/api/playback/secret')
+                    if (r) setSecret(r.secret)
+                  }}
+                >
+                  <Icon name="shield" size={15} /> Reveal signing secret
+                </button>
+              </div>
+            )
+          ) : (
+            <p className="access-note dev-sign-row">Only owners and admins can see or rotate the secret.</p>
+          )}
+        </Card>
+        <Card title="Sign a link" meta="On your server">
+          <Code label="Node.js" text={snippet} />
+        </Card>
+      </div>
+      <Aside title="How signed links work">
+        <ol className="dev-steps">
+          <li>
+            <b>Your server signs</b>
+            <span>the asset ID and an expiry time with the secret.</span>
+          </li>
+          <li>
+            <b>The viewer opens the link</b>
+            <span>
+              with the token attached. It also works on the stream URL, as <code>?token=</code>.
+            </span>
+          </li>
+          <li>
+            <b>The link stops working</b>
+            <span>when the expiry time passes.</span>
+          </li>
+        </ol>
+        <p className="dev-caution">
+          <Icon name="alert" size={15} />
+          Rotating the secret ends every link signed with the old one straight away.
+        </p>
+      </Aside>
       {rotating && (
         <ConfirmDialog
           title="Rotate the signing secret?"
@@ -487,15 +553,20 @@ export function signedLink(assetId, secret, ttl = 3600) {
           }}
         />
       )}
-    </Card>
+    </div>
   )
 }
 
 /* ------------------------------------------------ the page */
 export default function Developers() {
   const params = useSearchParams()
+  const router = useRouter()
   const { workspace } = useAccount()
   const manage = canManage(workspace.role)
+  const rawTab = params.get('tab')
+  const section: Section = isSection(rawTab) ? rawTab : params.get('delivery') ? 'webhooks' : 'keys'
+  const go = (to: Section) => router.replace(to === 'keys' ? '/dashboard/developers' : `/dashboard/developers?tab=${to}`, { scroll: false })
+  const [sample, setSample] = useState<Sample>('list')
   const [origin, setOrigin] = useState('https://your-mediaex-domain')
   const [keys, setKeys] = useState<ApiKey[] | null>(null)
   const [endpoints, setEndpoints] = useState<WebhookEndpoint[] | null>(null)
@@ -572,8 +643,16 @@ export default function Developers() {
 
   return (
     <>
-      <PageHead title="Developers" sub="API keys for your servers, webhooks for your workflows.">
-        {manage && (
+      <PageHead title="Developers" sub="Connect your own servers and tools to this workspace.">
+        <a className="btn btn-ghost btn-sm" href="/#developers" target="_blank" rel="noreferrer">
+          API overview <Icon name="external" size={14} />
+        </a>
+        {manage && section === 'webhooks' && (
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => setEditing('new')}>
+            <Icon name="plus" size={15} /> Add endpoint
+          </button>
+        )}
+        {manage && section === 'keys' && (
           <button type="button" className="btn btn-primary btn-sm" onClick={() => setCreatingKey(true)}>
             <Icon name="plus" size={15} /> Create API key
           </button>
@@ -582,198 +661,277 @@ export default function Developers() {
 
       {secret && <SecretBanner secret={secret} onClose={() => setSecret(null)} />}
 
-      <div className="stack">
-        <Card
-          title="API keys"
-          meta={keys ? `${keys.length} active` : 'Loading…'}
-          flush
-          hint={
-            <>
-              Send as <code>Authorization: Bearer mx_live_…</code> to <code>{origin}/api/v1</code>. Each key is rate limited; a 429 says when to retry.
-            </>
-          }
-        >
-          {keys?.length ? (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Key</th>
-                    <th>Access</th>
-                    <th>Created</th>
-                    <th>Last used</th>
-                    {manage && (
-                      <th className="actions">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {keys.map((k) => (
-                    <tr key={k.id}>
-                      <td>
-                        <b className="cell-strong">{k.name}</b>
-                      </td>
-                      <td className="mono">mx_live_••••{k.last4}</td>
-                      <td className="muted">{KEY_SCOPE_LABEL[k.scope]}</td>
-                      <td className="muted">
-                        <Ago iso={k.createdAt} />
-                        {k.createdBy ? ` · ${k.createdBy}` : ''}
-                      </td>
-                      <td className="muted">{k.lastUsedAt ? <Ago iso={k.lastUsedAt} /> : 'Never'}</td>
-                      {manage && (
-                        <td className="actions">
-                          <button type="button" className="btn btn-quiet btn-sm is-danger" onClick={() => setRevoking(k)}>
-                            Revoke
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            keys && (
-              <div className="empty">
-                <Icon name="key" size={22} />
-                <b>No API keys yet</b>
-                <p>{manage ? 'Create a key to list, upload and manage media from your own servers and scripts.' : 'Ask an owner or admin to create one.'}</p>
-                {manage && (
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCreatingKey(true)}>
-                    <Icon name="plus" size={14} /> Create API key
-                  </button>
-                )}
-              </div>
-            )
-          )}
-        </Card>
-
-        <div className="grid-2 even">
-          <Card
-            title="Webhook endpoints"
-            meta={endpoints ? `${endpoints.length} ${endpoints.length === 1 ? 'endpoint' : 'endpoints'}` : 'Loading…'}
-            flush
-            action={
-              manage ? (
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing('new')}>
-                  <Icon name="plus" size={15} /> Add endpoint
-                </button>
-              ) : undefined
-            }
-          >
-            {endpoints?.length ? (
-              <ul className="rows dev-hooks">
-                {endpoints.map((e) => (
-                  <li key={e.id} className={e.enabled ? '' : 'is-off'}>
-                    <span className="file-kind">
-                      <Icon name="link" size={16} />
-                    </span>
-                    <div>
-                      <b className="mono-strong" title={e.url}>
-                        {shortUrl(e.url)}
-                      </b>
-                      <small>
-                        {health(e)}
-                        <span>
-                          {e.events.length} {e.events.length === 1 ? 'event' : 'events'}
-                          {e.stats.total ? ` · ${e.stats.succeeded} of ${e.stats.total} delivered this week` : ''}
-                        </span>
-                      </small>
-                    </div>
-                    {manage && (
-                      <div className="dev-row-actions">
-                        <button type="button" className="btn btn-quiet btn-sm" disabled={!e.enabled} onClick={() => test(e)}>
-                          Test
-                        </button>
-                        <button type="button" className="btn btn-quiet btn-sm" onClick={() => setEditing(e)}>
-                          Edit
-                        </button>
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              endpoints && (
-                <div className="empty">
-                  <Icon name="link" size={22} />
-                  <b>No endpoints yet</b>
-                  <p>Get a signed POST when an upload is ready, fails, is deleted or needs review — no polling.</p>
-                </div>
-              )
-            )}
-          </Card>
-
-          <Quickstart origin={origin} />
-          <PlaybackSigning origin={origin} manage={manage} />
-        </div>
-
-        <Card
-          title="Recent deliveries"
-          className="dev-log"
-          meta={deliveries ? (deliveries.length >= 100 ? 'Newest 100' : `${deliveries.length} ${deliveries.length === 1 ? 'delivery' : 'deliveries'}`) : 'Loading…'}
-          flush
-          action={
-            <div className="dev-log-actions">
-              {endpoints && endpoints.length > 1 && (
-                <select className="select select-sm" aria-label="Endpoint" value={filter} onChange={(e) => setFilter(e.target.value)}>
-                  <option value="">All endpoints</option>
-                  {endpoints.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {shortUrl(e.url)}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <button type="button" className="icon-btn is-quiet" aria-label="Refresh" onClick={refresh}>
-                <Icon name="refresh" size={15} />
-              </button>
-            </div>
-          }
-        >
-          {deliveries?.length ? (
-            <div className="table-wrap">
-              <table className="table is-clickable">
-                <thead>
-                  <tr>
-                    <th>Event</th>
-                    <th>Endpoint</th>
-                    <th>Result</th>
-                    <th className="num">Duration</th>
-                    <th className="num">When</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {deliveries.map((d) => (
-                    <tr key={d.id} tabIndex={0} onClick={() => setViewing(d.id)} onKeyDown={(e) => e.key === 'Enter' && setViewing(d.id)}>
-                      <td className="mono">{d.event}</td>
-                      <td className="muted mono dev-ellipsis">{shortUrl(d.url)}</td>
-                      <td>
-                        <DeliveryStatus d={d} />
-                      </td>
-                      <td className="num mono">{d.durationMs === null ? '—' : `${d.durationMs} ms`}</td>
-                      <td className="num muted">
-                        <Ago iso={d.createdAt} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            deliveries && (
-              <div className="empty">
-                <Icon name="clock" size={22} />
-                <b>Nothing sent yet</b>
-                <p>Every webhook MediaEX sends appears here with its payload and your server’s answer.</p>
-              </div>
-            )
-          )}
-        </Card>
+      <div className="dev-tabs">
+        <Tabs
+          value={section}
+          onChange={go}
+          tabs={[
+            { value: 'keys', label: 'API keys', count: keys?.length },
+            { value: 'webhooks', label: 'Webhooks', count: endpoints?.length },
+            { value: 'playback', label: 'Playback signing' },
+            { value: 'quickstart', label: 'Quickstart' },
+          ]}
+        />
       </div>
+
+      {section === 'keys' && (
+        <div className="dev-layout">
+          <div className="stack">
+            <Card title="API keys" meta={keys ? `${keys.length} active` : 'Loading…'} flush>
+              {keys?.length ? (
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Key</th>
+                        <th>Access</th>
+                        <th>Created</th>
+                        <th>Last used</th>
+                        {manage && (
+                          <th className="actions">
+                            <span className="sr-only">Actions</span>
+                          </th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {keys.map((k) => (
+                        <tr key={k.id}>
+                          <td className="dev-key">
+                            <b className="cell-strong">{k.name}</b>
+                            <small className="mono">mx_live_••••{k.last4}</small>
+                          </td>
+                          <td className="muted">{KEY_SCOPE_LABEL[k.scope]}</td>
+                          <td className="muted">
+                            <Ago iso={k.createdAt} />
+                            {k.createdBy ? ` · ${k.createdBy}` : ''}
+                          </td>
+                          <td className="muted">{k.lastUsedAt ? <Ago iso={k.lastUsedAt} /> : 'Never'}</td>
+                          {manage && (
+                            <td className="actions">
+                              <button type="button" className="btn btn-quiet btn-sm is-danger" onClick={() => setRevoking(k)}>
+                                Revoke
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                keys && (
+                  <div className="empty">
+                    <Icon name="key" size={22} />
+                    <b>No API keys yet</b>
+                    <p>{manage ? 'Create a key to list, upload and manage media from your own servers and scripts.' : 'Ask an owner or admin to create one.'}</p>
+                    {manage && (
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCreatingKey(true)}>
+                        <Icon name="plus" size={14} /> Create API key
+                      </button>
+                    )}
+                  </div>
+                )
+              )}
+            </Card>
+          </div>
+          <Aside title="Using a key">
+            <CopyField label="Base URL" value={`${origin}/api/v1`} copied="Base URL copied" />
+            <CopyField label="Request header" value="Authorization: Bearer $MEDIAEX_KEY" copied="Header copied" />
+            <ul className="dev-notes">
+              <li>A key acts for the whole workspace. Give each service its own, so one can be revoked without breaking the rest.</li>
+              <li>The full key is shown once, when it is created. MediaEX keeps only a hash of it.</li>
+              <li>Each key is rate limited. A 429 answer says when to retry.</li>
+            </ul>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setSample('list')
+                go('quickstart')
+              }}
+            >
+              See code samples
+            </button>
+          </Aside>
+        </div>
+      )}
+
+      {section === 'webhooks' && (
+        <div className="dev-layout">
+          <div className="stack">
+            <Card title="Endpoints" meta={endpoints ? `${endpoints.length} ${endpoints.length === 1 ? 'endpoint' : 'endpoints'}` : 'Loading…'} flush>
+              {endpoints?.length ? (
+                <ul className="rows dev-hooks">
+                  {endpoints.map((e) => (
+                    <li key={e.id} className={e.enabled ? '' : 'is-off'}>
+                      <span className="file-kind">
+                        <Icon name="link" size={16} />
+                      </span>
+                      <div>
+                        <b className="mono-strong" title={e.url}>
+                          {shortUrl(e.url)}
+                        </b>
+                        <small>
+                          {health(e)}
+                          <span>
+                            {e.events.length} {e.events.length === 1 ? 'event' : 'events'}
+                            {e.stats.total ? ` · ${e.stats.succeeded} of ${e.stats.total} delivered this week` : ''}
+                          </span>
+                        </small>
+                      </div>
+                      {manage && (
+                        <div className="dev-row-actions">
+                          <button type="button" className="btn btn-quiet btn-sm" disabled={!e.enabled} onClick={() => test(e)}>
+                            Test
+                          </button>
+                          <button type="button" className="btn btn-quiet btn-sm" onClick={() => setEditing(e)}>
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                endpoints && (
+                  <div className="empty">
+                    <Icon name="link" size={22} />
+                    <b>No endpoints yet</b>
+                    <p>Get a signed POST when an upload is ready, fails, is deleted or needs review, with no polling.</p>
+                    {manage && (
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing('new')}>
+                        <Icon name="plus" size={14} /> Add endpoint
+                      </button>
+                    )}
+                  </div>
+                )
+              )}
+            </Card>
+
+            {/* with no endpoint and no history there is nothing to log yet: one empty state is enough */}
+            {(!!endpoints?.length || !!deliveries?.length) && (
+            <Card
+              title="Recent deliveries"
+              className="dev-log"
+              meta={deliveries ? (deliveries.length >= 100 ? 'Newest 100' : `${deliveries.length} ${deliveries.length === 1 ? 'delivery' : 'deliveries'}`) : 'Loading…'}
+              flush
+              action={
+                <div className="dev-log-actions">
+                  {endpoints && endpoints.length > 1 && (
+                    <select className="select select-sm" aria-label="Endpoint" value={filter} onChange={(e) => setFilter(e.target.value)}>
+                      <option value="">All endpoints</option>
+                      {endpoints.map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {shortUrl(e.url)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button type="button" className="icon-btn is-quiet" aria-label="Refresh" onClick={refresh}>
+                    <Icon name="refresh" size={15} />
+                  </button>
+                </div>
+              }
+            >
+              {deliveries?.length ? (
+                <div className="table-wrap">
+                  <table className="table is-clickable">
+                    <thead>
+                      <tr>
+                        <th>Event</th>
+                        <th>Endpoint</th>
+                        <th>Result</th>
+                        <th className="num">Duration</th>
+                        <th className="num">When</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {deliveries.map((d) => (
+                        <tr key={d.id} tabIndex={0} onClick={() => setViewing(d.id)} onKeyDown={(e) => e.key === 'Enter' && setViewing(d.id)}>
+                          <td className="mono">{d.event}</td>
+                          <td className="muted mono dev-ellipsis">{shortUrl(d.url)}</td>
+                          <td>
+                            <DeliveryStatus d={d} />
+                          </td>
+                          <td className="num mono">{d.durationMs === null ? '—' : `${d.durationMs} ms`}</td>
+                          <td className="num muted">
+                            <Ago iso={d.createdAt} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                deliveries && (
+                  <div className="empty">
+                    <Icon name="clock" size={22} />
+                    <b>Nothing sent yet</b>
+                    <p>Every webhook MediaEX sends appears here with its payload and your server’s answer.</p>
+                  </div>
+                )
+              )}
+            </Card>
+            )}
+          </div>
+          <Aside title="How webhooks work">
+            <ol className="dev-steps">
+              <li>
+                <b>MediaEX sends a signed POST</b>
+                <span>to every endpoint that subscribes to the event.</span>
+              </li>
+              <li>
+                <b>Answer with any 2xx within 10 seconds</b>
+                <span>Anything else counts as a failure.</span>
+              </li>
+              <li>
+                <b>Failures are retried for about a day</b>
+                <span>You can also send any delivery again from the log.</span>
+              </li>
+              <li>
+                <b>Check the signature</b>
+                <span>
+                  Compare the <code>MediaEX-Signature</code> header using the endpoint’s signing secret.
+                </span>
+              </li>
+            </ol>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setSample('verify')
+                go('quickstart')
+              }}
+            >
+              Signature check code
+            </button>
+          </Aside>
+        </div>
+      )}
+
+      {section === 'playback' && <PlaybackSigning origin={origin} manage={manage} />}
+
+      {section === 'quickstart' && (
+        <div className="dev-layout">
+          <div className="stack">
+            <Quickstart origin={origin} sample={sample} onSample={setSample} />
+          </div>
+          <Aside title="Before you start">
+            <CopyField label="Base URL" value={`${origin}/api/v1`} copied="Base URL copied" />
+            <ul className="dev-notes">
+              <li>
+                Create an API key and keep it in an environment variable, such as <code>MEDIAEX_KEY</code>.
+              </li>
+              <li>Send it on every request as a Bearer token.</li>
+              <li>Webhook checks need the raw request body, before any JSON parsing.</li>
+            </ul>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => go('keys')}>
+              Manage API keys
+            </button>
+          </Aside>
+        </div>
+      )}
 
       {creatingKey && (
         <KeyDialog
