@@ -19,7 +19,11 @@ let assetId
 
 async function request(url, init = {}) {
   const response = await fetch(url, { ...init, signal: AbortSignal.timeout(45000), redirect: 'error' })
-  if (!response.ok) throw new Error('HTTP ' + response.status)
+  if (!response.ok) {
+    const id = response.headers.get('x-mediaex-request-id')
+    const suffix = id && /^[0-9a-f-]{36}$/i.test(id) ? ' (MediaEX request ' + id + ')' : ''
+    throw new Error('HTTP ' + response.status + suffix)
+  }
   return response
 }
 
