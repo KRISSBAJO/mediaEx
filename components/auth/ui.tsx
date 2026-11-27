@@ -34,7 +34,7 @@ function GitHubIcon() {
   )
 }
 
-export type Social = { google: boolean; github: boolean }
+export type Social = { enterprise?: boolean; google: boolean; github: boolean }
 
 /** Renders only the providers configured on the server; nothing at all when none are. */
 export function SocialButtons({ social, callbackURL, disabled }: { social: Social; callbackURL: string; disabled?: boolean }) {

@@ -32,6 +32,10 @@
  *
  * The frontend forwards these paths unchanged (see app/api/*).
  */
+import { metadataJobs } from './metadata-jobs.mts'
+import { rights, auditExport } from './governance.mts'
+import { listReferences } from './references.mts'
+import { reviewAsset } from './reviews.mts'
 import { recovery, trashAssets } from './recovery.mts'
 import { handleRetention } from './retention.mts'
 import { handleAssetBackup, handleBackup } from './backup.mts'
@@ -391,10 +395,11 @@ export async function completeUpload(a: Actor, id: string) {
 }
 
 /* ------------------------------------------------ playback */
+import { meterDelivery } from './delivery-meter.mts'
 async function media(req: Request, id: string, rel: string) {
   const row = await getAssetRow(id)
   const unavailable = () => new Response('Not found', { status: 404, headers: noStore })
-  if (!row) return unavailable()
+  if (!row || row.retired || (row.rightsExpireAt && new Date(row.rightsExpireAt).getTime() <= Date.now())) return unavailable()
   let member: boolean | undefined
   const isMember = async () => (member ??= await isMemberOf(req.headers, row.organizationId))
   // a valid playback token travels on to everything the player loads next
@@ -405,6 +410,10 @@ async function media(req: Request, id: string, rel: string) {
   if (isPublic(row) && (!row.uploadPolicy || row.status === 'ready')) {
     if (expiresAt !== null) access = { expiresAt }
     else if (row.playback !== 'signed') access = 'public'
+  }
+  if (row.rightsExpireAt && access !== 'member') {
+    const limit = Math.floor(new Date(row.rightsExpireAt).getTime()/1000)
+    access = { expiresAt: typeof access === 'object' ? Math.min(access.expiresAt,limit) : limit }
   }
   const canView = async () => access !== 'member' || (await isMember())
 
@@ -424,7 +433,7 @@ async function media(req: Request, id: string, rel: string) {
   }
   if (rel === 'transform') {
     if (!(await canView())) return new Response(null, { status: 404, headers: noStore })
-    return transform(req, row, access, isMember)
+    return meterDelivery(row.organizationId, req.method, await transform(req, row, access, isMember))
   }
   const cc = /^captions\/([a-z]{2,3}(?:-[A-Z]{2})?)\.vtt$/.exec(rel)
   if (cc) {
@@ -432,7 +441,7 @@ async function media(req: Request, id: string, rel: string) {
     if (!key || !(await canView())) return unavailable()
     const res = await storage(row).serve(key, req, { access })
     res.headers.set('Access-Control-Allow-Origin', '*')
-    return res
+    return meterDelivery(row.organizationId, req.method, res)
   }
   if (rel === 'views') {
     if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
@@ -441,7 +450,7 @@ async function media(req: Request, id: string, rel: string) {
   }
   if (rel === 'original') {
     if (!(await isMember())) return unavailable()
-    return storage(row).serve(row.originalKey, req, { access: 'member', download: row.fileName })
+    return meterDelivery(row.organizationId, req.method, await storage(row).serve(row.originalKey, req, { access: 'member', download: row.fileName }))
   }
   const publicFile = rel === 'thumb.jpg' || rel === 'thumb.png' || rel === 'poster.jpg' || (rel.startsWith('hls/') && row.status === 'ready')
   if (!publicFile || !SAFE_REL.test(rel) || rel.split('/').includes('..')) return unavailable()
@@ -454,7 +463,7 @@ async function media(req: Request, id: string, rel: string) {
     })
   }
   res.headers.set('Access-Control-Allow-Origin', '*') // players on other sites may load the stream
-  return res
+  return meterDelivery(row.organizationId, req.method, res)
 }
 
 /* ------------------------------------------------ router */
@@ -462,6 +471,18 @@ export async function handleMedia(req: Request, pathname: string): Promise<Respo
   const m = req.method
   const parts = pathname.split('/').filter(Boolean) // ['api', 'assets', ...]
   if (parts[0] !== 'api' || !['assets', 'uploads', 'media', 'folders', 'collections', 'tags', 'searches', 'fields', 'moderation', 'keys', 'webhooks', 'v1', 'playback', 'analytics', 'encoding', 'billing'].includes(parts[1])) return null
+  if (!['v1','media'].includes(parts[1])) {
+    const restriction = await handle(async () => {
+      const a = await sessionActor(req.headers)
+      if (!['viewer','reviewer'].includes(a.role)) return new Response(null,{status:204})
+      const libraryRead = ['assets','collections','folders','fields','tags','searches'].includes(parts[1]) && ['GET','HEAD'].includes(m)
+        && !['backup','retention','jobs','audit','rights'].includes(parts[2] ?? '') && !['backup','rights'].includes(parts[3] ?? '')
+      const decision = a.role==='reviewer' && m==='POST' && parts[1]==='assets' && parts[3]==='review' && parts.length===4
+      if (!libraryRead && !decision) throw new HttpError(403,'Your workspace role does not permit this operation.')
+      return new Response(null,{status:204})
+    })
+    if (restriction.status!==204) return restriction
+  }
   if (parts[1] === 'v1') return handleV1(req, parts)
   if (parts[1] === 'uploads' && parts[2] === 'presets' && parts.length <= 4) return handle(() => handlePresets(req, parts[3]))
   if (parts[1] === 'playback') return handle(() => handlePlayback(req, parts))
@@ -473,6 +494,8 @@ export async function handleMedia(req: Request, pathname: string): Promise<Respo
   if (parts[1] === 'fields' && parts.length <= 3) return handle(() => handleFields(req, parts[2]))
   if (['folders', 'collections', 'tags', 'searches'].includes(parts[1])) return handle(() => handleLibrary(req, parts))
   if (parts[1] === 'moderation' && parts.length === 3) return handle(() => handleModeration(req, parts[2]))
+  if (parts[1] === 'assets' && parts[2] === 'jobs' && parts.length<=4) return handle(async()=>metadataJobs(req,await sessionActor(req.headers),parts[3]))
+  if (parts[1] === 'assets' && parts[2] === 'audit' && parts.length === 3) return handle(async()=>auditExport(req,await sessionActor(req.headers)))
   if (parts[1] === 'assets' && parts[2] === 'trash' && parts.length === 3) return handle(async () => recovery(await sessionActor(req.headers), req, undefined, 'trash'))
   if (parts[1] === 'assets' && parts[2] === 'backup' && parts.length === 3) return handle(() => handleBackup(req))
   if (parts[1] === 'assets' && parts[2] === 'retention' && parts.length <= 5) return handle(() => handleRetention(req, parts))
@@ -488,6 +511,15 @@ export async function handleMedia(req: Request, pathname: string): Promise<Respo
   return handle(async () => {
     if (parts[1] === 'assets') {
       if (!id && m === 'GET') return listAll(req)
+      if (id && parts.length===4 && parts[3]==='delivery-events' && m==='GET') {
+        const a=await sessionActor(req.headers)
+        const {rows}=await pool.query(`select event,status,attempts,"responseStatus","createdAt" from webhook_delivery where "organizationId"=$1
+          and payload->'data'->'asset'->>'id'=$2 order by "createdAt" desc limit 10`,[a.orgId,id])
+        return Response.json({events:rows},{headers:noStore})
+      }
+      if (id && parts.length === 4 && parts[3] === 'rights') return rights(req,await sessionActor(req.headers),id)
+      if (id && parts.length === 4 && parts[3] === 'references' && m === 'GET') return listReferences(await sessionActor(req.headers),id)
+      if (id && parts.length === 4 && parts[3] === 'review') return reviewAsset(await sessionActor(req.headers), req, id)
       if (id && parts.length === 4 && ['restore','revisions'].includes(parts[3])) return recovery(await sessionActor(req.headers), req, id, parts[3])
       if (id && parts.length === 3) return one(await sessionActor(req.headers), req, id)
       if (id && parts[3] === 'backup' && parts.length <= 5) return handleAssetBackup(req, id, parts[4])

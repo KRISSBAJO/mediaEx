@@ -18,10 +18,11 @@ import SettingsRetention from './SettingsRetention'
 import SettingsBackups from './SettingsBackups'
 
 type Tab = 'uploads' | 'retention' | 'backups' | 'general' | 'team' | 'metadata' | 'moderation' | 'encoding' | 'account' | 'billing'
-const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' }
+const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Contributor', contributor:'Contributor', reviewer:'Reviewer', viewer:'Read only' }
 const ROLE_HELP: Record<Role, string> = {
   owner: 'Everything, including deleting the workspace',
   admin: 'Manage members, settings and keys',
+  contributor:'Upload, edit and share media', reviewer:'Review file versions',viewer:'Read workspace media',
   member: 'Upload, edit and share media',
 }
 const initials = (name: string) =>
@@ -240,7 +241,7 @@ function Team() {
               aria-invalid={!!err}
             />
             <select className="select" value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label="Role">
-              <option value="member">Member</option>
+              <option value="member">Contributor</option><option value="reviewer">Reviewer</option><option value="viewer">Read only</option>
               <option value="admin">Admin</option>
             </select>
           </form>
@@ -290,7 +291,7 @@ function Team() {
                       <td>
                         {manage && !self && r !== 'owner' ? (
                           <select className="select select-sm" value={r} aria-label={`Role for ${m.user.name}`} onChange={(e) => changeRole(m, e.target.value as Role)}>
-                            <option value="member">Member</option>
+                            <option value="member">Contributor</option><option value="reviewer">Reviewer</option><option value="viewer">Read only</option>
                             <option value="admin">Admin</option>
                           </select>
                         ) : (

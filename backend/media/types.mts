@@ -27,6 +27,8 @@ export type Rendition = {
 }
 
 export type MediaAsset = {
+  revisionId?:string
+  sha256?:string|null
   id: string
   title: string
   type: MediaType
@@ -65,9 +67,9 @@ export type MediaAsset = {
 }
 
 /* ------------------------------------------------ developer platform */
-export const KEY_SCOPES = ['read', 'upload', 'full'] as const
+export const KEY_SCOPES = ['read', 'upload', 'publish', 'full'] as const
 export type KeyScope = (typeof KEY_SCOPES)[number]
-export const KEY_SCOPE_LABEL: Record<KeyScope, string> = { read: 'Read only', upload: 'Upload', full: 'Full access' }
+export const KEY_SCOPE_LABEL: Record<KeyScope, string> = { read: 'Read only', upload: 'Upload', publish:'Publish application references', full: 'Full access' }
 export type ApiKey = { id: string; name: string; scope: KeyScope; last4: string; createdAt: string; lastUsedAt: string | null; createdBy: string | null }
 
 export const WEBHOOK_EVENTS = ['asset.ready', 'asset.failed', 'asset.deleted', 'asset.review_required', 'asset.approved', 'asset.rejected', 'asset.captions_ready'] as const
@@ -158,6 +160,8 @@ export type AssetPage = {
 }
 
 export type SearchQuery = {
+  published?: boolean
+  missingField?: string
   q?: string
   folder?: string // a folder id, or "root" for assets in no folder; absent = everywhere
   collection?: string
@@ -182,6 +186,9 @@ export function parseQuery(p: URLSearchParams): SearchQuery {
   const q: SearchQuery = {}
   const text = p.get('q')?.trim().slice(0, 200)
   if (text) q.q = text
+  if (p.get("published") === "1") q.published = true
+  const missing = p.get("missingField")
+  if (missing && /^mdf_[a-z0-9]{4,24}$/.test(missing)) q.missingField = missing
   const folder = p.get('folder')
   if (folder && (folder === 'root' || ID.test(folder))) q.folder = folder
   const collection = p.get('collection')
@@ -205,6 +212,8 @@ export function parseQuery(p: URLSearchParams): SearchQuery {
 /** Writes a query as URL parameters (stable order, empty values left out). */
 export function queryParams(q: SearchQuery): URLSearchParams {
   const p = new URLSearchParams()
+  if (q.published) p.set("published","1")
+  if (q.missingField) p.set("missingField",q.missingField)
   if (q.q) p.set('q', q.q)
   if (q.folder) p.set('folder', q.folder)
   if (q.collection) p.set('collection', q.collection)
@@ -218,7 +227,7 @@ export function queryParams(q: SearchQuery): URLSearchParams {
 }
 
 /** Is anything narrowing the results (beyond where you are and how it's sorted)? */
-export const isFiltered = (q: SearchQuery) => Boolean(q.q || q.type?.length || q.status?.length || q.tags?.length || q.date || Object.keys(q.meta ?? {}).length)
+export const isFiltered = (q: SearchQuery) => Boolean(q.published || q.missingField || q.q || q.type?.length || q.status?.length || q.tags?.length || q.date || Object.keys(q.meta ?? {}).length)
 
 export const normaliseTag = (t: string) => t.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 32)
 

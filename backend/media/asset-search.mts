@@ -27,6 +27,8 @@ function assetSearch(orgId: string, query: SearchQuery) {
         ` or exists (select 1 from jsonb_each_text(a.metadata) m where m.value ilike ${p}))`,
     )
   }
+  if (query.published) where.push('exists (select 1 from media_reference ref where ref."assetId"=a.id and ref."organizationId"=a."organizationId")')
+  if (query.missingField) where.push(`nullif(btrim(a.metadata->>${arg(query.missingField)}),'') is null`)
   if (query.folder === 'root') where.push('a."folderId" is null')
   else if (query.folder) where.push(`a."folderId" = ${arg(query.folder)}`)
   if (query.collection) where.push(`exists (select 1 from "collection_asset" ca where ca."assetId" = a.id and ca."collectionId" = ${arg(query.collection)})`)

@@ -1,5 +1,6 @@
 // A compact workspace usage ledger survives asset deletion. Detailed events contain references and categories only.
 export const OPERATIONS_SCHEMA = /* sql */ `
+create table if not exists media_delivery_day (org text not null references "organization"(id) on delete cascade, day date not null, bytes bigint not null, responses bigint not null, redirects bigint not null, primary key (org,day));
 alter table asset add column if not exists "cleanupRetryAt" timestamptz;
 create table if not exists workspace_usage_day (
   org_id text not null references "organization"(id) on delete cascade,
@@ -14,6 +15,10 @@ create table if not exists workspace_processing_completion (
   completed_at timestamptz not null,
   media_seconds double precision not null
 );
+alter table workspace_processing_completion add column if not exists processing_ms bigint;
+alter table workspace_processing_completion add column if not exists asset_id text;
+alter table workspace_processing_completion add column if not exists revision_id uuid;
+create unique index if not exists workspace_processing_revision_idx on workspace_processing_completion(org_id,asset_id,revision_id);
 create index if not exists workspace_processing_period on workspace_processing_completion(org_id, completed_at);
 create index if not exists workspace_processing_retention on workspace_processing_completion(completed_at);
 create table if not exists workspace_media_error (
@@ -30,9 +35,9 @@ create index if not exists workspace_media_error_retention on workspace_media_er
 
 create or replace function mediaex_capture_asset_usage() returns trigger language plpgsql as $$
 begin
-  if old.status = 'processing' and new.status = 'ready' and new."readyAt" is not null and new.type <> 'image' then
-    insert into workspace_processing_completion (org_id, completed_at, media_seconds)
-    values (new."organizationId", new."readyAt", greatest(new.duration, 0));
+  if old.status = 'processing' and new.status = 'ready' and new."readyAt" is not null then
+    insert into workspace_processing_completion (org_id, completed_at, media_seconds,asset_id,revision_id,processing_ms)
+    values (new."organizationId", new."readyAt", case when new.type='image' then 0 else greatest(new.duration,0) end,new.id,new."revisionId",new."processingMs") on conflict (org_id,asset_id,revision_id) do nothing;
   elsif new.status = 'failed' and old.status <> 'failed' then
     insert into workspace_media_error (org_id, category, reference, asset_id)
     values (new."organizationId", 'encoding', new.id, new.id);

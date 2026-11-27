@@ -2,7 +2,7 @@
 
 import { createContext, useContext } from 'react'
 
-export type Role = 'owner' | 'admin' | 'member'
+export type Role = 'owner' | 'admin' | 'member' | 'contributor' | 'reviewer' | 'viewer'
 export type Account = {
   user: { id: string; name: string; email: string; initials: string; emailVerified: boolean; isAdmin: boolean }
   /** set while a site admin is signed in as this user */

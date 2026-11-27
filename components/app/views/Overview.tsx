@@ -1,11 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { STAGES, isActive, type MediaAsset } from '@/lib/media/types'
 import { bytes, compact, type Range } from '@/lib/sample'
 import { countryName, useAnalytics } from './Analytics'
-import { useAccount } from '../account'
+
 import { Ago, useMedia } from '../media'
 import { BarList, LineChart, ViewToggle } from '../charts'
 import Icon from '../Icon'
@@ -25,7 +25,7 @@ function activity(assets: MediaAsset[]) {
 }
 
 export default function Overview() {
-  const { user } = useAccount()
+
   const [range, setRange] = useState<Range>('30d')
   const [table, setTable] = useState(false)
   const { data, error } = useAnalytics(range)
@@ -38,21 +38,16 @@ export default function Overview() {
   const recent = assets.slice(0, 6)
   const byType = (['video', 'audio', 'image'] as const).map((t) => ({ label: t === 'video' ? 'Video' : t === 'audio' ? 'Audio' : 'Images', value: summary[t] }))
   const stored = summary.bytes
-  const [greet, setGreet] = useState('Welcome back')
-  useEffect(() => {
-    const h = new Date().getHours()
-    setGreet(h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening')
-  }, [])
 
   return (
     <>
-      <PageHead title={`${greet}, ${user.name.split(' ')[0]}`} sub="What the pipeline is working on, and how your media is doing.">
+      <PageHead title="Workspace overview" sub="Track uploads, processing, and audience activity.">
         <Segmented label="Date range" value={range} options={RANGES} onChange={setRange} />
       </PageHead>
 
-      <p className="section-note">
-        <span className="overline">Audience</span> Views through share links and embeds
-      </p>
+      <section aria-labelledby="overview-audience"><div className="overview-section-head">
+        <h2 id="overview-audience">Audience</h2><p>Views through share links and embeds</p>
+      </div>
       {error && (
         <div className="banner is-bad" role="alert">
           <Icon name="alert" />
@@ -65,6 +60,8 @@ export default function Overview() {
         <StatTile label="Avg. time to first frame" value={t?.avgStartupMs != null ? t.avgStartupMs.toLocaleString('en-US') : '—'} unit="ms" delta={c?.avgStartupMs ?? undefined} upIsGood={false} period={PERIOD[range]} />
         <StatTile label="Streamed" value={t ? bytes(t.bytesDelivered) : '—'} delta={c?.bytesDelivered ?? undefined} period={PERIOD[range]} />
       </div>
+
+      </section>
 
       <div className="grid-2">
         <div className="stack">

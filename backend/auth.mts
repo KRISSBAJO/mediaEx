@@ -8,7 +8,8 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { betterAuth } from 'better-auth'
-import { admin, organization } from 'better-auth/plugins'
+import { defaultRoles,memberAc } from 'better-auth/plugins/organization/access'
+import { admin, organization, genericOAuth } from 'better-auth/plugins'
 import pg from 'pg'
 
 export const baseURL = new URL(process.env.BETTER_AUTH_URL ?? 'http://localhost:3400').origin
@@ -72,7 +73,9 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
 if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET)
   socialProviders.github = { clientId: process.env.GITHUB_CLIENT_ID, clientSecret: process.env.GITHUB_CLIENT_SECRET }
 
-export const enabledSocial = { google: 'google' in socialProviders, github: 'github' in socialProviders }
+const enterpriseDomains = (process.env.ENTERPRISE_OIDC_DOMAINS??'').split(',').map(d=>d.trim().toLowerCase()).filter(Boolean)
+const enterpriseEnabled = Boolean(process.env.ENTERPRISE_OIDC_DISCOVERY?.startsWith('https://') && process.env.ENTERPRISE_OIDC_CLIENT_ID && process.env.ENTERPRISE_OIDC_CLIENT_SECRET && enterpriseDomains.length)
+export const enabledSocial = { enterprise:enterpriseEnabled, google: 'google' in socialProviders, github: 'github' in socialProviders }
 
 /* ------------------------------------------------ site admins */
 /** Configured email addresses are eligible for bootstrap once ownership is verified. */
@@ -229,7 +232,16 @@ export const auth = betterAuth({
       impersonationSessionDuration: 60 * 60,
       bannedUserMessage: 'This account has been suspended. Contact MediaEX support if you think this is a mistake.',
     }),
+    genericOAuth({config:enterpriseEnabled ?
+      [{providerId:'enterprise',discoveryUrl:process.env.ENTERPRISE_OIDC_DISCOVERY,clientId:process.env.ENTERPRISE_OIDC_CLIENT_ID!,
+        clientSecret:process.env.ENTERPRISE_OIDC_CLIENT_SECRET,pkce:true,requireIdTokenVerification:true,requireEmailVerification:true,
+        mapProfileToUser(profile) {
+          const domain=typeof profile.email==='string'?profile.email.toLowerCase().split('@').pop():undefined
+          if(!domain || !enterpriseDomains.includes(domain))throw new Error('Email is outside the configured enterprise domains.')
+          return {}
+        },scopes:['openid','profile','email']}] : []}),
     organization({
+      roles:{...defaultRoles,contributor:memberAc,reviewer:memberAc,viewer:memberAc},
       allowUserToCreateOrganization: true,
       organizationLimit: 10,
       creatorRole: 'owner',

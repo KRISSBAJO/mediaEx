@@ -8,8 +8,6 @@ import Logo from './Logo'
 
 const LINKS = [
   { id: 'features', label: 'Product' },
-  { id: 'engine', label: 'Engine' },
-  { id: 'workflow', label: 'Workflow' },
   { id: 'developers', label: 'Developers' },
   { id: 'pricing', label: 'Pricing', page: '/pricing' },
 ]

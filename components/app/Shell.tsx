@@ -442,7 +442,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             </Link>
           </div>
         </header>
-        <main className="content">
+        <main className="content workspace-content">
           {suspended ? (
             <div className="suspended-screen" role="alert">
               <div>

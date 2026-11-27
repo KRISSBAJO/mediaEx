@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { PoolClient } from 'pg'
 import { pool } from '../auth.mts'
 import { HttpError, prefixOf, type AssetRow } from './assets.mts'
@@ -5,13 +6,15 @@ import { type Actor } from './keys.mts'
 import { checkProbedPolicy } from './presets.mts'
 import { storage } from './storage.mts'
 import { removeBackupCopies } from './backup.mts'
+import { assertUnreferenced } from './references.mts'
+import { latestReview } from './reviews.mts'
 import { emitAsset } from './webhooks.mts'
 
 const noStore = { 'Cache-Control': 'private, no-store' }
 const respond = (data: unknown) => Response.json(data, { headers: noStore })
 const missing = () => new HttpError(404, 'This asset is unavailable in the selected workspace.')
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
-type VersionRow = AssetRow & { deletedAt: string | null; revisionId: string }
+type VersionRow = AssetRow & { revisionCreator?:string|null; revisionCreatedAt?:string|null; revisionReason?:string|null; deletedAt: string | null; revisionId: string; reviewRequiredForReplacement: boolean }
 type Snapshot = {
   asset: VersionRow
   captions: Array<Record<string, unknown>>
@@ -49,6 +52,22 @@ async function requireBytes(row: AssetRow, captions: Snapshot['captions'] = []) 
   const store = storage(row)
   if (Number(row.size) !== await store.size(row.originalKey))
     throw new HttpError(409, 'The stored original is missing or incomplete. The asset has been left in place.')
+  if (!row.sha256) {
+    const original=await store.serve(row.originalKey,new Request('http://mediaex.internal/original'),{access:'member'})
+    if (!original.ok || !original.body) throw new HttpError(409,'The original file is unavailable.')
+    const reader=original.body.getReader(),digest=createHash('sha256')
+    let bytes=0
+    try {
+      for (;;) {
+        const part=await reader.read()
+        if (part.done) break
+        bytes+=part.value.length
+        digest.update(part.value)
+      }
+    } finally {reader.releaseLock()}
+    if (bytes!==Number(row.size)) throw new HttpError(409,'The original file changed during verification.')
+    row.sha256=digest.digest('hex')
+  }
   const outputs = new Set([row.thumbKey, row.posterKey, row.playlistKey, ...Object.values(row.playlists ?? {}),
     ...captions.filter(c => c.status === 'ready').map(c => c.key)].filter((key): key is string => typeof key === 'string'))
   const prefix = prefixOf(row) + '/'
@@ -63,6 +82,7 @@ export async function trashAssets(a: Actor, ids: string[]) {
   const removed = await transaction(async db => {
     const { rows } = await db.query<VersionRow>(
       'select * from asset where "organizationId"=$1 and id=any($2::text[]) and "deletedAt" is null order by id for update', [a.orgId, ids])
+    await assertUnreferenced(db,a.orgId,rows.map(row => row.id))
     if (rows.some(row => row.status === 'processing')) throw new HttpError(409, 'Wait for encoding to finish before moving the asset to Trash.')
     const working = await db.query(`select 1 from caption where "assetId"=any($1::text[]) and status='processing' limit 1`, [rows.map(row => row.id)])
     if (working.rowCount) throw new HttpError(409, 'Wait for caption processing to finish before moving the asset to Trash.')
@@ -103,7 +123,14 @@ async function archive(db: PoolClient, previous: Snapshot) {
 // as the prior version snapshot. No copying, overwriting or renaming large files is needed.
 async function activate(db: PoolClient, current: VersionRow, snapshot: Snapshot, restoreMetadata: boolean) {
   const next = { ...snapshot.asset }
-  const fields = ['revisionId','originalKey','storageBackend','size','outputSize','duration','width','height','fileName','mimeType','sourceInfo',
+  next.revisionCreator ??= next.createdBy ?? next.uploadedVia ?? null
+  next.revisionCreatedAt ??= new Date(next.createdAt).toISOString()
+  next.revisionReason ??= 'Original upload'
+  // Earlier snapshots predate checksums. Never carry another revision's digest forward.
+  Object.assign(next,{sha256: ('sha256' in next ? next.sha256 : null)})
+  const expiries = [current.rightsExpireAt,next.rightsExpireAt].filter(Boolean).map(v => new Date(v!).getTime())
+  next.rightsExpireAt = expiries.length ? new Date(Math.min(...expiries)) : null
+  const fields = ['revisionCreator','revisionCreatedAt','revisionReason','processingMs','sha256','rightsExpireAt','revisionId','originalKey','storageBackend','size','outputSize','duration','width','height','fileName','mimeType','sourceInfo',
     'renditions','thumbKey','posterKey','playlistKey','playlists','readyAt','moderation','moderationFlags','moderationNote','moderatedBy','moderatedAt','playback',
     'uploadPolicy']
   // The replacement must fit both ingestion policies, including the original output ladder.
@@ -183,9 +210,11 @@ export async function recovery(a: Actor, req: Request, id: string | undefined, a
   if (req.method === 'GET') {
     const { rows: [row] } = await pool.query('select "revisionId" from asset where id=$1 and "organizationId"=$2 and "deletedAt" is null',[id,a.orgId])
     if (!row) throw missing()
-    const { rows } = await pool.query(`select id, snapshot->'asset'->>'fileName' as "fileName",size,"createdAt"
+    const { rows } = await pool.query(`select id, snapshot->'asset'->>'fileName' as "fileName",snapshot->'asset'->>'sha256' as sha256,
+      snapshot->'asset'->>'width' as width,snapshot->'asset'->>'height' as height,coalesce(snapshot->'asset'->>'revisionCreator',snapshot->'asset'->>'createdBy',snapshot->'asset'->>'uploadedVia') as creator,
+      coalesce(snapshot->'asset'->>'revisionReason','Original upload') as reason,coalesce(snapshot->'asset'->>'revisionCreatedAt',snapshot->'asset'->>'createdAt') as "versionCreatedAt",size,"createdAt"
       from asset_revision where "assetId"=$1 and "organizationId"=$2 order by "createdAt" desc,id`, [id,a.orgId])
-    const history = await pool.query('select action,actor,"createdAt" from asset_recovery_event where "assetId"=$1 and "organizationId"=$2 order by id desc limit 50',[id,a.orgId])
+    const history = await pool.query('select action,actor,"revisionId","createdAt" from asset_recovery_event where "assetId"=$1 and "organizationId"=$2 order by id desc limit 50',[id,a.orgId])
     return respond({ current: row.revisionId, versions: rows, history: history.rows })
   }
   if (req.method !== 'POST') throw new HttpError(405,'Method not allowed.')
@@ -202,6 +231,7 @@ export async function recovery(a: Actor, req: Request, id: string | undefined, a
     if (!current) throw missing()
     if (current.takenDown) throw new HttpError(409, 'This asset is under a site-admin takedown.')
     if (current.revisionId === revision) return
+    await assertUnreferenced(db,a.orgId,rows.map(row => row.id))
     if (current.revisionId !== input.expectedCurrent) throw new HttpError(409,'The current version changed. Refresh and try again.')
     if (current.status !== 'ready') throw new HttpError(409,'The current asset must finish processing first.')
     let next: Snapshot
@@ -211,12 +241,23 @@ export async function recovery(a: Actor, req: Request, id: string | undefined, a
       if (source.type !== current.type || source.status !== 'ready') throw new HttpError(409,'Choose a ready upload of the same media type.')
       if ((await db.query('select 1 from asset_revision where "assetId"=$1 limit 1',[sourceId])).rowCount)
         throw new HttpError(409,'The replacement has version history. Choose a fresh upload.')
+      if (input.expectedReplacementRevision !== undefined && input.expectedReplacementRevision !== source.revisionId)
+        throw new HttpError(409, 'The replacement version changed. Review the file again.')
+      const review = await latestReview(db,a.orgId,source.revisionId)
+      if ((current.reviewRequiredForReplacement || input.requireApproved === true) && review?.state !== 'approved')
+        throw new HttpError(409, 'Submit the replacement version for approval before publishing.')
+      if (review && input.expectedReplacementRevision !== source.revisionId)
+        throw new HttpError(409, 'Specify the exact reviewed replacement revision.')
+      if (review && review.state !== 'approved') throw new HttpError(409, 'The replacement is awaiting approval.')
+      if (review) await db.query('update asset set "reviewRequiredForReplacement"=true where id=$1', [id])
       next = await getSnapshot(db,source)
+      next.asset.revisionReason = typeof input.reason==='string' && input.reason.trim() ? input.reason.trim().slice(0,500) : 'Replacement upload'
     } else {
       const { rows: [version] } = await db.query('select snapshot from asset_revision where id=$1 and "assetId"=$2 and "organizationId"=$3 for update',[revision,id,a.orgId])
       if (!version) throw missing()
       next = version.snapshot
     }
+    if (next.asset.retired || (next.asset.rightsExpireAt && new Date(next.asset.rightsExpireAt).getTime()<=Date.now())) throw new HttpError(409,'This version is retired or its rights have expired.')
     if (next.asset.takenDown) throw new HttpError(409, 'The selected version is under a site-admin takedown.')
     const previous = await getSnapshot(db,current)
     await requireBytes(current,previous.captions)
@@ -224,6 +265,9 @@ export async function recovery(a: Actor, req: Request, id: string | undefined, a
     await archive(db,previous)
     await activate(db,current,next,Boolean(revision))
     if (sourceId) {
+      const { rows: [published] } = await db.query('select moderation,"reviewRequiredForReplacement" from asset where id=$1',[id])
+      if (published.reviewRequiredForReplacement && published.moderation !== 'approved')
+        throw new HttpError(409, 'The replacement must also pass the asset moderation policy before publication.')
       await db.query('update media_store_transfer set "assetId"=$1 where "assetId"=$2 and "organizationId"=$3', [id,sourceId,a.orgId])
       await db.query('update view_session set "assetId"=$1 where "assetId"=$2', [id,sourceId])
       await db.query('delete from asset where id=$1', [sourceId])

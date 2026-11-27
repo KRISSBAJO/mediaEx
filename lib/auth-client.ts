@@ -1,9 +1,10 @@
 'use client'
 
+import { defaultRoles,memberAc } from 'better-auth/plugins/organization/access'
 import { organizationClient } from 'better-auth/client/plugins'
 import { createAuthClient } from 'better-auth/react'
 
-export const authClient = createAuthClient({ plugins: [organizationClient()] })
+export const authClient = createAuthClient({ plugins: [organizationClient({roles:{...defaultRoles,contributor:memberAc,reviewer:memberAc,viewer:memberAc}})] })
 
 /** Turns a Better Auth error into a sentence for the form. */
 export function authMessage(error: { code?: string; message?: string; status?: number } | null | undefined, fallback = 'Something went wrong. Try again.') {

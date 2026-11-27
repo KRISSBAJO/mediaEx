@@ -33,6 +33,9 @@ function Report({ data }: { data: OperationsReport }) {
       <StatTile label="Tracked media storage" value={bytes(total)} />
       <StatTile label="Active upload reservations" value={bytes(data.reservedBytes)} />
       <StatTile label="Processed media · 30 days" value={data.processingMinutes.toLocaleString(undefined, { maximumFractionDigits: 2 })} unit="min" />
+      <StatTile label="Worker time · 30 days" value={(data.workerMinutes??0).toLocaleString(undefined,{maximumFractionDigits:2})} unit="min" />
+      <StatTile label="Origin bytes over 30 days" value={bytes(data.originBytes ?? 0)} />
+      <StatTile label="Storage redirects over 30 days" value={(data.bucketRedirects ?? 0).toLocaleString()} />
       <StatTile label="Player delivery · 30 days" value={bytes(data.playerBytes)} />
     </div>
     {credential && <Card title="Storage credential" meta={credential.state === 'active' ? 'Version ' + credential.version : 'OpenBao'}>

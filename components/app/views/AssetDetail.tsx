@@ -8,7 +8,8 @@ import { bytes, duration as fmtDuration } from '@/lib/sample'
 import Icon from '../Icon'
 import MediaPlayer from '../MediaPlayer'
 import MetadataEditor from '../MetadataEditor'
-import { VersionPanel } from './Recovery'
+import RightsPanel from './RightsPanel'
+import { ReviewPanel, VersionPanel } from './Recovery'
 import { AssetBackupRow } from './SettingsBackups'
 import CaptionsPanel from '../CaptionsPanel'
 import TransformBuilder from '../TransformBuilder'
@@ -103,6 +104,7 @@ export default function AssetDetail({ id, initial }: { id: string; initial: Medi
   const media = useMedia()
   const [collecting, setCollecting] = useState(false)
   const recent = get(id)
+  const [versionChange, setVersionChange] = useState(0)
   const [detail, setDetail] = useState<MediaAsset | null>(initial)
   useEffect(() => {
     if (recent) return
@@ -486,7 +488,10 @@ export default function AssetDetail({ id, initial }: { id: string; initial: Medi
               </div>
             </div>
           </Card>
+          {ready && canManage(workspace.role) && <RightsPanel key={a.id} id={a.id} onSave={()=>setVersionChange(v=>v+1)} />}
+          {ready && <ReviewPanel key={workspace.id + a.id + versionChange} assetId={a.id} />}
           {ready && canManage(workspace.role) && <VersionPanel key={a.id} asset={a} onChanged={async () => {
+            setVersionChange(value => value + 1)
             const updated = await request<{ asset: MediaAsset }>('/api/assets/' + a.id)
             setDetail(updated.asset)
             await Promise.all([media.refresh(), lib.reload()])

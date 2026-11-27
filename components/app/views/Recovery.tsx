@@ -61,19 +61,60 @@ export function TrashView() {
   </>
 }
 
+type ReviewEvent = { id: string; state: 'in_review' | 'changes_requested' | 'approved'; actor: string; comment: string; createdAt: string }
+type Review = { assignedReviewer: string | null; revisionId: string; latest: ReviewEvent | null; history: ReviewEvent[] }
+const reviewLabels = { in_review: 'In review', changes_requested: 'Changes requested', approved: 'Approved' }
+
+export function ReviewPanel({ assetId }: { assetId: string }) {
+  const { workspace, user } = useAccount()
+  const uses = useRecoveryData<{ references: { application:string; resource:string; slot:string }[] }>('/api/assets/' + assetId + '/references', workspace.id)
+  const path = '/api/assets/' + assetId + '/review'
+  const { data, error, reload } = useRecoveryData<Review>(path, workspace.id)
+  const [comment, setComment] = useState('')
+  const [busy, setBusy] = useState(false)
+  async function decide(action: 'submit' | 'approve' | 'request_changes') {
+    if (!data || busy) return
+    setBusy(true)
+    try {
+      await request(path, { method: 'POST', json: { action, revisionId: data.revisionId, expectedEvent: data.latest?.id ?? null, comment } })
+      setComment('')
+      toast('Review recorded')
+    } catch (e) { toast(message(e)) } finally { reload(); setBusy(false) }
+  }
+  const last = data?.latest
+  const canSubmit = !['reviewer','viewer'].includes(workspace.role) && (!last || last.state === 'changes_requested')
+  const canDecide = last?.state === 'in_review' && (data?.assignedReviewer ? data.assignedReviewer===user.id : canManage(workspace.role) || String(workspace.role)==='reviewer') && last.actor !== 'user:' + user.id
+  return <Card title="File review">{error ? <p role="alert">{error} <button onClick={reload}>Retry</button></p> : !data ? <p>Loading review.</p> :
+    <div className="stack"><strong>{last ? reviewLabels[last.state] : 'Draft'}</strong>
+      <details><summary>Where this file is used</summary>{uses.error ? <p role="alert">{uses.error}</p> : !uses.data ? <p>Loading references.</p> : uses.data.references.length ?
+        <ul>{uses.data.references.map(ref => <li key={JSON.stringify(ref)}>{ref.application} · {ref.resource} · {ref.slot}</li>)}</ul> : <p>No applications have registered a use for this file.</p>}
+        <small>External embeds may also use this file.</small></details>
+      {(canSubmit || canDecide) && <>
+        <label>Review comment<textarea className="input" maxLength={2000} value={comment} onChange={e => setComment(e.target.value)} /></label>
+        {canSubmit && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void decide('submit')}>Submit this version</button>}
+        {canDecide && <div><button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void decide('approve')}>Approve version</button>{' '}
+          <button className="btn btn-ghost btn-sm" disabled={busy || !comment.trim()} onClick={() => void decide('request_changes')}>Request changes</button></div>}
+      </>}
+      {!!data.history.length && <details><summary>Review activity</summary><ul>{data.history.map(event =>
+        <li key={event.id}>{reviewLabels[event.state]} · {event.actor} · {date(event.createdAt)} {event.comment}</li>)}</ul></details>}
+    </div>}</Card>
+}
+
 export function VersionPanel({ asset, onChanged }: { asset: MediaAsset; onChanged: () => Promise<void> }) {
   const { workspace } = useAccount()
   const { assets } = useMedia()
   const path = '/api/assets/' + asset.id + '/revisions'
   const { data, error, reload } = useRecoveryData<Versions>(path, workspace.id)
+  const [reason,setReason] = useState('')
   const [source, setSource] = useState('')
   const [busy, setBusy] = useState(false)
+  const candidate = useRecoveryData<Review>(/^ast_[a-z0-9]{6,20}$/.test(source.trim()) ? '/api/assets/' + source.trim() + '/review' : null, workspace.id)
   async function change(selection: { replacementId: string } | { restoreRevisionId: string }) {
-    if (!data || busy) return
+    if (!data || busy || ('replacementId' in selection && candidate.data?.latest?.state !== 'approved')) return
     setBusy(true)
     try {
-      await request(path, { method: 'POST', json: { ...selection, expectedCurrent: data.current } })
-      setSource('')
+      await request(path, { method: 'POST', json: { ...selection, reason, expectedCurrent: data.current, requireApproved: 'replacementId' in selection, expectedReplacementRevision: 'replacementId' in selection ? candidate.data?.revisionId : undefined } })
+      setSource(''); setReason('')
       reload()
       await onChanged()
       toast('Current asset version updated')
@@ -87,9 +128,13 @@ export function VersionPanel({ asset, onChanged }: { asset: MediaAsset; onChange
       <details><summary>Publish a replacement</summary>
         <p><Link href="/dashboard/uploads">Upload the new file</Link>, then choose its asset ID. Its separate share link will close. This asset keeps its link and previous versions.</p>
         <form onSubmit={e => { e.preventDefault(); void change({ replacementId: source.trim() }) }}>
+          <label>Reason for replacement<input className="input" maxLength={500} value={reason} onChange={e=>setReason(e.target.value)} /></label>
           <label>Replacement asset ID<input className="input" list="replacement-uploads" placeholder="ast_…" required pattern="ast_[a-z0-9]{6,20}" value={source} onChange={e => setSource(e.target.value)} /></label>
           <datalist id="replacement-uploads">{assets.filter(a => a.id !== asset.id && a.type === asset.type && a.status === 'ready').map(a => <option key={a.id} value={a.id}>{a.title}</option>)}</datalist>
-          <button className="btn btn-primary btn-sm" disabled={busy || !source.trim()}>Publish version</button>
+          {candidate.data && !candidate.data.latest && <p>Open the replacement asset and submit its file for review.</p>}
+          {candidate.error && <p role="alert">{candidate.error}</p>}
+          {candidate.data?.latest && <p>{reviewLabels[candidate.data.latest.state]}</p>}
+          <button className="btn btn-primary btn-sm" disabled={busy || candidate.data?.latest?.state !== 'approved'}>Publish version</button>
         </form>
       </details>
       {data.history.length > 0 && <details><summary>Recovery activity</summary><ul>{data.history.map((event, index) =>

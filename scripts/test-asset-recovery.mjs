@@ -7,6 +7,7 @@ import test from 'node:test'
 import { pool } from '../backend/auth.mts'
 import { getAssetRow, newAssetId, prefixOf } from '../backend/media/assets.mts'
 import { handleMedia } from '../backend/media/routes.mts'
+import { reviewAsset } from '../backend/media/reviews.mts'
 import { purgeExpiredTrash, recovery } from '../backend/media/recovery.mts'
 
 // Run against a migrated disposable Postgres instance. All mutations are scoped to a random fixture workspace.
@@ -76,16 +77,40 @@ test('trash, recovery and replacement preserve bytes, metadata and permissions',
     await assert.rejects(recovery({...manager,role:'member'},new Request('http://localhost'),undefined,'trash'),e=>e.status===403)
     await assert.rejects(recovery({...manager,orgId:org+'other'},new Request('http://localhost'),a,'revisions'),e=>e.status===404)
     const publish = { expectedCurrent:revisionId, replacementId:b }
+    const reviewPath = '/api/v1/assets/'+b+'/review'
+    const submit = { action:'submit',revisionId:next.revisionId,expectedEvent:null,comment:'New event cover' }
+    assert.equal((await api(reviewPath,'POST',limited,submit)).status,403)
+    const submitted = await api(reviewPath,'POST',key,submit)
+    assert.equal(submitted.status,200)
+    assert.equal((await api(reviewPath,'POST',key,submit)).status,409)
+    publish.expectedReplacementRevision = next.revisionId
+    assert.equal((await post(publish)).status,409)
+    const decision = { ...submit, action:'request_changes',expectedEvent:submitted.body.latest.id,comment:'Adjust crop' }
+    assert.equal((await api(reviewPath,'POST',key,decision)).status,403)
+    const decide = async (body, actor=manager) => (await reviewAsset(actor,new Request('http://localhost',{method:'POST',body:JSON.stringify(body)}),b)).json()
+    const changes = await decide(decision)
+    const resubmitted = await decide({...submit,expectedEvent:changes.latest.id})
+    const approval = {...decision,action:'approve',expectedEvent:resubmitted.latest.id}
+    await assert.rejects(decide(approval),e=>e.status===403)
+    const reviewer = {...manager,userId:'independent-reviewer'}
+    const approved = await decide(approval,reviewer)
+    assert.equal(approved.history.length,4)
+    assert.equal(approved.latest.state,'approved')
+    assert.equal((await post({...publish,expectedReplacementRevision:revisionId})).status,409)
     await pool.query('update caption set status=\'processing\' where "assetId"=$1',[a])
     assert.equal((await post(publish)).status,409)
     await pool.query('update caption set status=\'ready\' where "assetId"=$1',[a])
+    assert.equal((await post(publish)).status,409)
+    assert.equal((await getAssetRow(a,org)).revisionId,revisionId)
+    await pool.query('insert into "user" (id,name,email,"emailVerified","createdAt","updatedAt") values ($1,$1,$2,true,now(),now())',[org,org+'@example.test'])
+    await pool.query('update asset set moderation=\'approved\',"moderatedBy"=$2 where id=$1',[b,org])
     assert.equal((await post(publish)).status,200)
     assert.equal(await getAssetRow(b,org),null)
     assert.equal((await pool.query('select "assetId" from media_store_transfer where "revisionId"=$1',[next.revisionId])).rows[0].assetId,a)
     const current = await getAssetRow(a,org)
     assert.equal(current.revisionId,next.revisionId)
     assert.equal(current.playback,'signed')
-    assert.equal(current.moderation,'pending')
+    assert.equal(current.moderation,'approved')
     assert.deepEqual(current.uploadPolicy,strict)
     assert.equal((await api(root,'PATCH',key,{playback:'public'})).status,409)
     assert.equal((await api(root,'PATCH',key,{title:'corrected title'})).status,200)
@@ -136,6 +161,7 @@ test('trash, recovery and replacement preserve bytes, metadata and permissions',
     assert.equal((await pool.query('select * from asset_recovery_event where "assetId"=$1 and action=\'expired\'',[a])).rowCount,1)
   } finally {
     await pool.query('delete from organization where id=$1',[org])
+    await pool.query('delete from "user" where id=$1',[org])
     await pool.end()
     await rm(dir,{recursive:true,force:true})
   }

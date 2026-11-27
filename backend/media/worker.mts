@@ -10,6 +10,8 @@
  * Jobs are claimed with `for update skip locked`, so several app instances can share the queue safely.
  * Needs `ffmpeg` and `ffprobe` on PATH (or FFMPEG_PATH / FFPROBE_PATH).
  */
+import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
@@ -22,6 +24,7 @@ import { emitAsset } from './webhooks.mts'
 import { encoderFor, extraCodecsFor, type Encoder } from './encoding.mts'
 import { captionsAfterReady } from './captions.mts'
 import { maxShortSide } from './billing.mts'
+import { runMetadataJobs } from './metadata-jobs.mts'
 import { storage } from './storage.mts'
 import type { ExtraCodec, MediaType, Rendition } from './types.mts'
 
@@ -306,6 +309,9 @@ async function processAsset(job: AssetRow) {
     // 1 · Analyse
     const input = await store.localCopy(job.originalKey, scratch)
     const { info, inputBytes } = await inspectUpload(input, job)
+    const hash = createHash('sha256')
+    for await (const chunk of createReadStream(input)) hash.update(chunk)
+    const sha256 = hash.digest('hex')
     await update(job.id, { type: info.type, duration: info.duration, width: info.width, height: info.height, sourceInfo: info.sourceInfo, progress: 4 })
 
     const { dir: out, publish } = await store.outputDir(prefix, scratch)
@@ -399,7 +405,7 @@ async function processAsset(job: AssetRow) {
     const outputSize = await dirSize(out)
     await publish()
     await update(job.id, {
-      status: 'ready', stage: 3, progress: 100, error: null, readyAt: new Date(), duration: info.duration,
+      sha256, processingMs:Date.now()-t0, status: 'ready', stage: 3, progress: 100, error: null, readyAt: new Date(), duration: info.duration,
       thumbKey, posterKey, playlistKey, playlists: JSON.stringify(playlists), renditions: JSON.stringify(renditions), outputSize,
     })
     // moderation: blocklist and optional automatic review decide whether it goes public
@@ -434,6 +440,7 @@ export function startWorker() {
       if (state.busy) return
       state.busy = true
       try {
+        await runMetadataJobs()
         await recoverStale()
         for (let job = await claim(); job; job = await claim()) await processAsset(job)
       } catch (e) {

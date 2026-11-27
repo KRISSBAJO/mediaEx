@@ -33,12 +33,18 @@
 import { baseURL, pool } from '../auth.mts'
 import { HttpError, apiAsset, handle } from './assets.mts'
 import { searchAssets } from './asset-search.mts'
+import { directory } from './directory.mts'
+import { auditExport } from './governance.mts'
+import { reference, listReferences } from './references.mts'
+import { reviewAsset } from './reviews.mts'
 import { recovery } from './recovery.mts'
 import { keyActor, requireScope } from './keys.mts'
 import { captions, completeUpload, one, playbackToken, receivePart, receiveUpload, retry, startUpload, uploadParts } from './routes.mts'
 import { KEY_SCOPE_LABEL, parseQuery } from './types.mts'
 import { analyticsFor } from './analytics.mts'
-import { listPresets } from './presets.mts'
+import { inWorkspaceTransaction, listPresets } from './presets.mts'
+import { assertStorage, planOf } from './billing.mts'
+import { nativeBuckets } from './native-buckets.mts'
 
 /** Where API callers reach us: the public app origin, which forwards /api/v1 to this service. */
 export const apiBase = () => (process.env.PUBLIC_API_URL ?? baseURL).replace(/\/$/, '')
@@ -47,9 +53,22 @@ const noStore = { 'Cache-Control': 'no-store' }
 
 export function handleV1(req: Request, parts: string[]) {
   return handle(async () => {
+    if (parts[2]==='scim') return directory(req,parts.slice(3))
     const a = await keyActor(req)
     const [, , area, raw, sub, extra] = parts // api, v1, area, id?, sub?, part number or caption language?
     const m = req.method
+    if (a.scope==='publish' && !['whoami','references'].includes(area)) throw new HttpError(403,'This service key is scoped to application references.')
+    if (area === 'audit' && parts.length === 3) return auditExport(req,a)
+    if (area === 'buckets') {
+      requireScope(a, m === 'GET' || m === 'HEAD' ? 'read' : 'full')
+      return nativeBuckets(req, a.orgId, parts.slice(3), async run => {
+        const plan = await planOf(a.orgId)
+        return inWorkspaceTransaction(a.orgId, client => run(async additional => {
+          if (additional > 0) await assertStorage(client, a.orgId, additional, plan)
+        }))
+      })
+    }
+    if (area === 'references' && parts.length === 3) return reference(req,a)
     if (parts.length > ((area === 'uploads' && sub === 'parts') || (area === 'assets' && sub === 'captions') ? 6 : 5)) throw new HttpError(404, 'Not found')
     if (area === 'uploads' && raw === 'presets' && parts.length === 4 && m === 'GET') {
       requireScope(a, 'read')
@@ -81,6 +100,8 @@ export function handleV1(req: Request, parts: string[]) {
         const more = rows.length > limit
         return Response.json({ assets: rows.slice(0, limit).map(apiAsset), limit, offset, nextOffset: more ? offset + limit : null }, { headers: noStore })
       }
+      if (id && sub === 'references' && parts.length === 5 && m === 'GET') return listReferences(a,id)
+      if (id && sub === 'review' && parts.length === 5) return reviewAsset(a, req, id)
       if (id && sub && ['restore','revisions'].includes(sub) && parts.length === 5) return recovery(a, req, id, sub)
       if (id && !sub) {
         requireScope(a, m === 'GET' || m === 'HEAD' ? 'read' : 'full')

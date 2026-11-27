@@ -1,273 +1,46 @@
-import HeroReel from '@/components/HeroReel'
-import WaveTerrain from '@/components/WaveTerrain'
+import StudioPreview from '@/components/StudioPreview'
 import Nav from '@/components/Nav'
 import MotionRoot from '@/components/MotionRoot'
 import PriceDial from '@/components/PriceDial'
-import Closing from '@/components/Closing'
 import Footer from '@/components/Footer'
-import Pipeline from '@/components/Pipeline'
-import DevConsole from '@/components/DevConsole'
 
-// what people ship with it (not a customer list)
-const BRANDS = ['Feature films', 'Music videos', 'Podcasts', 'Course libraries', 'Sports highlights', 'Newsrooms', 'Product launches', 'Live recordings', 'Trailers', 'Social clips']
+import styles from '@/components/UploadDemo.module.css'
+import UploadDemo from '@/components/UploadDemo'
 
-const d = (ms: number) => ({ ['--d' as string]: `${ms}ms` })
-
-function Arrow() {
+function SectionHead({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <svg className="arrow" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M3 8h9m-4-4 4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function SectionHead({
-  index,
-  label,
-  note,
-  title,
-  children,
-}: {
-  index: string
-  label: string
-  note?: string
-  title?: React.ReactNode
-  children?: React.ReactNode
-}) {
-  return (
-    <header className="shead" data-reveal>
-      <div className="shead-rule">
-        <span>
-          <b>{index}</b> {label}
-        </span>
-        {note && <span className="hide-sm">{note}</span>}
+    <header className="shead">
+      <div className="shead-body">
+        <h2>{title}</h2>
+        <p>{children}</p>
       </div>
-      {title && (
-        <div className="shead-body">
-          <h2>{title}</h2>
-          {children && <p>{children}</p>}
-        </div>
-      )}
     </header>
   )
 }
-
 
 export default function Home() {
   return (
     <>
       <MotionRoot />
       <Nav />
-
       <main id="top">
-        {/* ---------------- HERO ---------------- */}
-        <section className="hero" aria-label="Introduction">
-          <HeroReel />
-          <div className="hero-copy">
-            <h1 className="hero-title hero-anim" style={d(250)}>
-              Upload once.
-              <br />
-              <span className="grad-text">Stream everywhere.</span>
-            </h1>
-            <div className="hero-aside hero-anim" style={d(400)}>
-              <p>
-                MediaEX is the media cloud for creators and studios. Store, transcode and deliver video, audio and images
-                to every screen in milliseconds.
-              </p>
-              <div className="hero-actions">
-                <a href="/sign-up" className="btn btn-primary btn-lg">
-                  Start free <Arrow />
-                </a>
-                <a href="#tour" className="link-arrow" data-play-tour>
-                  Watch the tour <Arrow />
-                </a>
-              </div>
-            </div>
-          </div>
-        </section>
+        <StudioPreview />
 
-        {/* ---------------- BRANDS ---------------- */}
-        <section className="brands" aria-label="What it's for">
-          <div className="brands-inner">
-            <p className="brands-label">One pipeline for everything you publish</p>
-            <div className="marquee">
-              <div className="marquee-track">
-                {[...BRANDS, ...BRANDS].map((b, i) => (
-                  <span key={i} className="brand-name" aria-hidden={i >= BRANDS.length}>
-                    {b}
-                  </span>
-                ))}
-              </div>
-            </div>
+        <section className={`section ${styles.section}`} id="developers" aria-labelledby="upload-title">
+          <div className={styles.intro}>
+            <h2 id="upload-title">Try a media upload.</h2>
+            <p>Choose an image or video and follow its progress from upload to delivery in your workspace.</p>
+            <a href="/dashboard/developers">Open developer dashboard <span aria-hidden="true">↗</span></a>
           </div>
+          <UploadDemo />
         </section>
-
-        {/* ---------------- FEATURES ---------------- */}
-        <section className="section" id="features">
-          <SectionHead
-            index="01"
-            label="Platform"
-            note="One file, six stops"
-            title={
-              <>
-                Drop in a file. <span className="grad-text">Get back a media platform.</span>
-              </>
-            }
-          >
-            Everything after the upload — encoding, transforms, organising, review and delivery — runs in one pipeline you can watch,
-            script and trust.
-          </SectionHead>
-          <Pipeline />
-        </section>
-
-        {/* ---------------- ENGINE ---------------- */}
-        <section className="engine" id="engine">
-          <WaveTerrain />
-          <div className="engine-inner">
-            <SectionHead
-              index="02"
-              label="Engine"
-              note="Move your cursor across the field"
-              title={
-                <>
-                  A realtime pipeline, <span className="grad-text">tuned to the millisecond.</span>
-                </>
-              }
-            >
-              Parallel encoding ladders, uploads that survive a dropped connection, and a player that reports every stall.
-            </SectionHead>
-            <div className="stats">
-              {[
-                { n: 3, s: '', l: 'Codecs per video: H.264, HEVC and AV1' },
-                { n: 50, s: 'GB', l: 'Per upload, resumable in parts' },
-                { n: 8, s: 'K', l: 'Top streaming resolution, on Studio' },
-                { n: 7, s: '', l: 'Signed webhook events' },
-              ].map((s, i) => (
-                <div key={s.l} className="stat" data-reveal style={d(i * 90)}>
-                  <p>{s.l}</p>
-                  <div className="stat-num">
-                    <span data-count={s.n}>
-                      0
-                    </span>
-                    <em>{s.s}</em>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ---------------- WORKFLOW ---------------- */}
-        <section className="section" id="workflow">
-          <SectionHead
-            index="03"
-            label="Workflow"
-            note="Raw file to every screen"
-            title={
-              <>
-                Three steps. <span className="grad-text">No render queue.</span>
-              </>
-            }
-          >
-            Upload from anywhere, let the pipeline do the work in parallel, and ship one playback URL to every screen.
-          </SectionHead>
-          <div className="steps" data-progress>
-            <div className="steps-line">
-              <i />
-            </div>
-            {[
-              {
-                t: 'Upload',
-                p: 'Drop files in the browser, sync a folder, or push from your camera, DAW or NLE through the API.',
-                k: 'mx upload ./footage',
-              },
-              {
-                t: 'Process',
-                p: 'MediaEX encodes every asset into an adaptive ladder, in H.264 and optionally HEVC and AV1, captions it and packages it for streaming.',
-                k: 'av1 · hevc · captions',
-              },
-              {
-                t: 'Deliver',
-                p: 'Embed the player, share a review link, or stream to apps and TVs with one playback URL.',
-                k: 'play.mediaex.io/a8f2',
-              },
-            ].map((s, i) => (
-              <div key={s.t} className="step" data-reveal style={d(i * 140)}>
-                <span className="step-num">
-                  0{i + 1} <i>/ 03</i>
-                </span>
-                <h3>{s.t}</h3>
-                <p>{s.p}</p>
-                <code>{s.k}</code>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ---------------- DEVELOPERS ---------------- */}
-        <section className="section" id="developers">
-          <SectionHead
-            index="04"
-            label="Developers"
-            note="REST · Webhooks · Transforms"
-            title={
-              <>
-                Ship video features <span className="grad-text">in an afternoon.</span>
-              </>
-            }
-          >
-            Everything the dashboard does, from your own code: scoped API keys, a REST API, signed webhooks and URL transforms.
-          </SectionHead>
-          <div data-reveal>
-            <DevConsole />
-          </div>
-          <div className="dev-specs" data-reveal style={d(120)}>
-            {[
-              ['API keys', 'Scoped to read, upload or full access. Revoke any key instantly.', 'mx_live_••••'],
-              ['REST API', 'List, search, upload, edit and delete assets.', '/api/v1'],
-              ['Webhooks', 'Seven asset events, signed and retried for a day.', 'HMAC-SHA256'],
-              ['Transforms', 'Any size, crop or format, straight from a URL.', '?w=1200&f=avif'],
-            ].map(([t, x, k]) => (
-              <div key={t} className="dev-spec">
-                <b>{t}</b>
-                <p>{x}</p>
-                <code>{k}</code>
-              </div>
-            ))}
-          </div>
-          <div className="dev-actions" data-reveal style={d(200)}>
-            <a href="/dashboard/developers" className="btn btn-primary">
-              Create an API key <Arrow />
-            </a>
-            <a href="/dashboard/developers" className="link-arrow">
-              Open the quickstart <Arrow />
-            </a>
-          </div>
-        </section>
-
-        {/* ---------------- PRICING ---------------- */}
         <section className="section" id="pricing">
-          <SectionHead
-            index="05"
-            label="Pricing"
-            note="Drag to size your library"
-            title={
-              <>
-                Start free. <span className="grad-text">Scale when you&apos;re ready.</span>
-              </>
-            }
-          >
-            One price that follows your library. Every plan includes the player, the API and global delivery. No egress surprises.
+          <SectionHead title="Find a plan for your library">
+            Adjust the library size to estimate your plan.
           </SectionHead>
-          <div data-reveal>
-            <PriceDial />
-          </div>
+          <PriceDial />
         </section>
-
-        {/* ---------------- CLOSING ---------------- */}
-        <Closing />
       </main>
-
       <Footer />
     </>
   )

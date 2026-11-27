@@ -74,7 +74,7 @@ export default function Filters({ query, go, onSave }: { query: SearchQuery; go:
   }, [text])
 
   const set = (patch: Partial<SearchQuery>) => go({ ...query, ...patch })
-  const filtered = Boolean(query.q || query.type?.length || query.status?.length || query.tags?.length || query.date || Object.keys(query.meta ?? {}).length)
+  const filtered = Boolean(query.published || query.missingField || query.q || query.type?.length || query.status?.length || query.tags?.length || query.date || Object.keys(query.meta ?? {}).length)
   const dropdowns = fields.filter((f) => f.type === 'select' || f.type === 'multiselect')
   const setMeta = (id: string, v: string | null) => {
     const meta = { ...(query.meta ?? {}) }
@@ -109,6 +109,10 @@ export default function Filters({ query, go, onSave }: { query: SearchQuery; go:
       </label>
 
       <div className="lib-chips">
+        <Chip label="Publication" count={Number(!!query.published)+Number(!!query.missingField)}>{() => <>
+          <label className="fopt"><input type="checkbox" checked={!!query.published} onChange={e=>set({published:e.target.checked || undefined})} />Published by an application</label>
+          <label>Missing metadata<select value={query.missingField ?? ''} onChange={e=>set({missingField:e.target.value || undefined})}><option value="">Any</option>{fields.map(f=><option key={f.id} value={f.id}>{f.label}</option>)}</select></label>
+        </>}</Chip>
         <Chip label="Type" count={query.type?.length}>
           {() => <Checks options={['video', 'audio', 'image'] as const} value={query.type} labels={TYPE_LABEL} onChange={(type) => set({ type: type.length ? type : undefined })} />}
         </Chip>

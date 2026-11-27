@@ -66,6 +66,7 @@ export function validateValue(field: MetadataField, value: unknown): unknown {
       if (typeof value !== 'string') throw new HttpError(400, `${field.label} must be text.`)
       const max = field.type === 'text' ? 500 : 5000
       if (value.length > max) throw new HttpError(400, `${field.label} can be up to ${max} characters.`)
+      if (field.required && !value.trim()) throw new HttpError(400,field.label+' is required.')
       return value.trim()
     }
     case 'number': {

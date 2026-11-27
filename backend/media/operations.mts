@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg'
 import { pool } from '../auth.mts'
 import { requireMember, HttpError } from './assets.mts'
 import { vaultStatus } from './storage-vault.mts'
+import { bucketUsage } from './native-buckets.mts'
 
 type Database = Pick<PoolClient, 'query'>
 export type OperationalError = {
@@ -26,6 +27,9 @@ type CurrentStorage = {
 }
 export type OperationsReport = CurrentStorage & {
   processingMinutes: number
+  workerMinutes?: number
+  originBytes?: number
+  bucketRedirects?: number
   playerBytes: number
   errors: number
   details: OperationalError[] | null
@@ -53,7 +57,7 @@ async function currentStorage(orgId: string, db: Database) {
 
 export async function committedStorage(orgId: string, db: Database = pool) {
   const s = await currentStorage(orgId, db)
-  return s.originalBytes + s.encodedBytes + s.transformBytes + s.versionBytes + s.reservedBytes
+  return s.originalBytes + s.encodedBytes + s.transformBytes + s.versionBytes + s.reservedBytes + bucketUsage(orgId)
 }
 
 export async function processingMinutesForPeriod(orgId: string, start: Date, end: Date, db: Database = pool) {
@@ -66,8 +70,11 @@ export async function processingMinutesForPeriod(orgId: string, start: Date, end
 export async function workspaceOperations(orgId: string, role: string, db: Database = pool): Promise<OperationsReport> {
   const [current, activity, details] = await Promise.all([
     currentStorage(orgId, db),
-    db.query<{ processingMinutes: number; playerBytes: number; errors: number }>(`
-      select (select coalesce(sum(media_seconds), 0) / 60 from workspace_processing_completion where org_id = $1
+    db.query<{ workerMinutes:number; processingMinutes: number; playerBytes: number; errors: number }>(`
+      select (select coalesce(sum(bytes),0)::float8 from media_delivery_day where org=$1 and day >= (now() at time zone 'UTC')::date - 29) as "originBytes",
+  (select coalesce(sum(redirects),0)::float8 from media_delivery_day where org=$1 and day >= (now() at time zone 'UTC')::date - 29) as "bucketRedirects",
+  (select coalesce(sum(processing_ms),0)::float8/60000 from workspace_processing_completion where org_id=$1 and completed_at>=now()-interval '30 days') as "workerMinutes",
+             (select coalesce(sum(media_seconds), 0) / 60 from workspace_processing_completion where org_id = $1
                 and completed_at >= ((now() at time zone 'UTC')::date - 29)::timestamp at time zone 'UTC'
                 and completed_at <= now()) as "processingMinutes",
              coalesce(sum(player_bytes), 0)::float8 as "playerBytes",

@@ -7,6 +7,7 @@ import { isActive, parseQuery, queryParams, type AssetPage, type SearchQuery } f
 import { bytes, duration as fmtDuration } from '@/lib/sample'
 import Icon from '../Icon'
 import { request, useLibrary } from '../library'
+import JobPanel from '../library-ui/JobPanel'
 import Filters from '../library-ui/Filters'
 import Preview from '../library-ui/Preview'
 import LibrarySidebar, { DRAG_TYPE } from '../library-ui/Sidebar'
@@ -110,6 +111,7 @@ export default function Library() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [anchor, setAnchor] = useState<string | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
+  const [jobId,setJobId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<Dialog>(null)
   const [view, setView] = useView()
 
@@ -193,7 +195,7 @@ export default function Library() {
   const collection = query.collection ? lib.collections.find((c) => c.id === query.collection) : undefined
   const path = folder ? lib.folderPath(folder.id) : []
   const title = collection?.name ?? folder?.name ?? (query.folder === 'root' ? 'Not in a folder' : 'Library')
-  const filtered = Boolean(query.q || query.type?.length || query.status?.length || query.tags?.length || query.date || Object.keys(query.meta ?? {}).length)
+  const filtered = Boolean(query.published || query.missingField || query.q || query.type?.length || query.status?.length || query.tags?.length || query.date || Object.keys(query.meta ?? {}).length)
   const sub = !page ? 'Loading…' : `${page.total.toLocaleString()} ${filtered ? (page.total === 1 ? 'match' : 'matches') : (page.total === 1 ? 'asset' : 'assets')} · ${bytes(page.bytes)}${collection?.description ? ` · ${collection.description}` : ''}`
 
   return (
@@ -232,6 +234,7 @@ export default function Library() {
         <LibrarySidebar query={query} go={go} onDropAssets={onDropAssets} />
 
         <section className="lib-main" aria-label="Assets">
+          {jobId && <JobPanel id={jobId} onClose={()=>setJobId(null)} />}
           <Filters query={query} go={go} onSave={() => setDialog('save')} />
           {searchError && (
             <div className="banner is-bad" role="alert">
@@ -483,7 +486,14 @@ export default function Library() {
         <MetaDialog
           count={ids.length}
           onClose={() => setDialog(null)}
-          onApply={async (field, value) => (await lib.bulk(ids, { action: 'meta', field, value })) && done(`Updated ${n(ids.length)}`)}
+          onApply={async (field,value) => {
+            try {
+              const result=await request<{job:string}>('/api/assets/jobs',{method:'POST',json:{ids,field,value}})
+              setJobId(result.job)
+              setDialog(null)
+              return true
+            } catch (e) { toast(e instanceof Error?e.message:'Could not preview the edit.'); return false }
+          }}
         />
       )}
       {dialog === 'delete' && (

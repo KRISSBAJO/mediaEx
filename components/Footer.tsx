@@ -5,7 +5,7 @@ import Logo from './Logo'
 
 // only places that exist: sections, pages and the dashboard
 const COLUMNS = [
-  { h: 'Product', l: [['Platform', '/#features'], ['Take the tour', '/#tour'], ['Engine', '/#engine'], ['Pricing', '/pricing']] },
+  { h: 'Product', l: [['Platform', '/#features'], ['Take the tour', '/#tour'], ['Pricing', '/pricing']] },
   { h: 'Developers', l: [['API overview', '/#developers'], ['API keys and webhooks', '/dashboard/developers']] },
   { h: 'Account', l: [['Start free', '/sign-up'], ['Sign in', '/sign-in'], ['Dashboard', '/dashboard']] },
 ]

@@ -53,6 +53,10 @@ export default function SignInForm({ next, social }: { next: string; social: Soc
   return (
     <div className="auth-card">
       <AuthHeader title="Welcome back" sub="Sign in to your MediaEX workspace." />
+      {social.enterprise && <button type="button" className="btn btn-quiet" disabled={loading} onClick={async()=>{
+        const {error}=await authClient.signIn.social({provider:'enterprise',callbackURL:next})
+        if(error)setFormError(authMessage(error))
+      }}>Sign in with enterprise SSO</button>}
       <SocialButtons social={social} callbackURL={next} disabled={loading} />
       <Divider show={social.google || social.github}>or with email</Divider>
       <form onSubmit={submit} noValidate className="auth-fields">

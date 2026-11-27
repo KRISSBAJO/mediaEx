@@ -35,8 +35,6 @@ export async function sessionActor(headers: Headers): Promise<Actor> {
 }
 
 /* ------------------------------------------------ authenticating a key */
-const buckets = new Map<string, { tokens: number; at: number }>()
-const lastUsedWrite = new Map<string, number>()
 
 /** Reads `Authorization: Bearer mx_live_…`, checks it, and applies the per-key rate limit. */
 export async function keyActor(req: Request): Promise<Actor> {
@@ -53,28 +51,14 @@ export async function keyActor(req: Request): Promise<Actor> {
   if (!k || k.revokedAt || !timingSafeEqual(Buffer.from(k.hash), Buffer.from(hash))) throw new HttpError(401, 'That API key is invalid or has been revoked.')
   await assertNotSuspended(k.organizationId)
 
-  // token bucket: RATE_PER_MINUTE per key, refilled continuously
-  const now = Date.now()
-  const b = buckets.get(k.id) ?? { tokens: RATE_PER_MINUTE, at: now }
-  b.tokens = Math.min(RATE_PER_MINUTE, b.tokens + ((now - b.at) / 60_000) * RATE_PER_MINUTE)
-  b.at = now
-  if (b.tokens < 1) {
-    const wait = Math.ceil(((1 - b.tokens) / RATE_PER_MINUTE) * 60)
-    throw Object.assign(new HttpError(429, `Too many requests. This key allows ${RATE_PER_MINUTE} a minute; try again in ${wait} s.`), { retryAfter: wait })
-  }
-  b.tokens -= 1
-  buckets.set(k.id, b)
-
-  // note when it was last used, at most once a minute
-  if (now - (lastUsedWrite.get(k.id) ?? 0) > 60_000) {
-    lastUsedWrite.set(k.id, now)
-    void pool.query('update "api_key" set "lastUsedAt" = now() where id = $1', [k.id])
-  }
+  const { rows: [limit] } = await pool.query('select mediaex_charge_key($1,$2,$3) as wait', [k.id,hash,RATE_PER_MINUTE])
+  if (limit.wait < 0) throw new HttpError(401,'This key is no longer active.')
+  if (limit.wait > 0) throw Object.assign(new HttpError(429,'API key rate limit reached.'), {retryAfter:limit.wait})
   return { orgId: k.organizationId, userId: null, role: 'member', via: 'key', scope: k.scope, keyName: k.name, keyId: k.id }
 }
 
 export function requireScope(actor: Actor, need: 'read' | 'upload' | 'full') {
-  const rank = { read: 0, upload: 1, full: 2 }
+  const rank = { publish:0, read: 0, upload: 1, full: 2 }
   if (rank[actor.scope] < rank[need]) throw new HttpError(403, `This key’s scope is “${actor.scope}”; this request needs “${need}”.`)
 }
 
@@ -118,9 +102,17 @@ export async function handleKeys(req: Request, id?: string) {
     return Response.json({ key: (await list(m.orgId)).find((k) => k.id === kid), secret: value }, { status: 201, headers: { 'Cache-Control': 'no-store' } })
   }
 
+  if (id && req.method === 'PATCH') {
+    const input = await req.json().catch(() => null)
+    if (input?.action !== 'rotate' || typeof input.expectedLast4 !== 'string') throw new HttpError(400,'Supply the current key suffix to rotate.')
+    const value = secret()
+    const changed = await pool.query('update api_key set hash=$1,last4=$2,"lastChangedBy"=$6 where id=$3 and "organizationId"=$4 and last4=$5 and "revokedAt" is null', [sha256(value),value.slice(-4),id,m.orgId,input.expectedLast4,m.user.id])
+    if (!changed.rowCount) throw new HttpError(409,'The key changed or is unavailable.')
+    return Response.json({secret:value}, {headers:{'Cache-Control':'no-store'}})
+  }
   if (id && req.method === 'DELETE') {
     if (!/^key_[a-z0-9]{4,24}$/.test(id)) throw new HttpError(404, 'That key doesn’t exist.')
-    const { rowCount } = await pool.query('update "api_key" set "revokedAt" = now() where id = $1 and "organizationId" = $2 and "revokedAt" is null', [id, m.orgId])
+    const { rowCount } = await pool.query('update "api_key" set "revokedAt" = now(), "lastChangedBy"=$3 where id = $1 and "organizationId" = $2 and "revokedAt" is null', [id, m.orgId, m.user.id])
     if (!rowCount) throw new HttpError(404, 'That key doesn’t exist.')
     return Response.json({ keys: await list(m.orgId) })
   }

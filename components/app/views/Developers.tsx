@@ -20,6 +20,7 @@ import { Ago } from '../media'
 import { Card, PageHead, Segmented, Tabs, copyText, toast } from '../ui'
 
 const SCOPE_HELP: Record<KeyScope, string> = {
+  publish: 'Manage published references for the application that matches this key name.',
   read: 'List and read assets and folders.',
   upload: 'Everything in Read, plus uploading new files.',
   full: 'Everything, including editing and deleting assets.',
@@ -574,6 +575,7 @@ export default function Developers() {
   const [filter, setFilter] = useState('')
   const [secret, setSecret] = useState<Revealed | null>(null)
   const [creatingKey, setCreatingKey] = useState(false)
+  const [rotateKey,setRotateKey] = useState<ApiKey|null>(null)
   const [revoking, setRevoking] = useState<ApiKey | null>(null)
   const [editing, setEditing] = useState<WebhookEndpoint | 'new' | null>(null)
   const [deleting, setDeleting] = useState<WebhookEndpoint | null>(null)
@@ -709,6 +711,7 @@ export default function Developers() {
                           <td className="muted">{k.lastUsedAt ? <Ago iso={k.lastUsedAt} /> : 'Never'}</td>
                           {manage && (
                             <td className="actions">
+                              <button type="button" className="btn btn-quiet btn-sm is-danger" onClick={()=>setRotateKey(k)}>Rotate</button>
                               <button type="button" className="btn btn-quiet btn-sm is-danger" onClick={() => setRevoking(k)}>
                                 Revoke
                               </button>
@@ -944,6 +947,11 @@ export default function Developers() {
           }}
         />
       )}
+      {rotateKey && <ConfirmDialog title={'Rotate '+rotateKey.name+'?'} sub="The current secret stops working immediately." action="Rotate key" onClose={()=>setRotateKey(null)} onConfirm={async()=>{
+          const r=await call<{secret:string}>('/api/keys/'+rotateKey.id,{method:'PATCH',json:{action:'rotate',expectedLast4:rotateKey.last4}})
+          if (!r) return false
+          setSecret({kind:'key',label:rotateKey.name,value:r.secret}); await loadKeys(); return true
+        }} />}
       {revoking && (
         <ConfirmDialog
           title={`Revoke “${revoking.name}”?`}

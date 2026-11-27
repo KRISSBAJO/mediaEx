@@ -1,0 +1,67 @@
+diff --git a/components/admin/events.tsx b/components/admin/events.tsx
+index 835b253..2c894f6 100644
+--- a/components/admin/events.tsx
++++ b/components/admin/events.tsx
+@@ -3,7 +3,7 @@
+ /** Every event on the marketplace, with take-down, publish, pause/resume sales and cancel (with refunds). */
+ import Link from 'next/link';
+ import { Fragment, useState } from 'react';
+-import { CATEGORY_NAME, useApi, when } from '../api';
++import { api, CATEGORY_NAME, useApi, when } from '../api';
+ import { money } from '../money';
+ import { eventHref } from '../remote-events';
+ import { CancelDateDialog, CancelEventDialog } from '../cancel-event';
+@@ -79,7 +79,7 @@ export function EventsSection() {
+   const [status, setStatus] = useState('');
+   const list = useList<AdminEvent>('/admin/events', { q: useDebounced(q), status });
+   const act = useAct();
+-  const [open, setOpen] = useState<{ id: string; kind: 'takedown' | 'publish' | 'dates' | 'schedule' } | null>(null);
++  const [open, setOpen] = useState<{ id: string; kind: 'takedown' | 'publish' | 'dates' | 'schedule' | 'covers' } | null>(null);
+   const [cancellingDate, setCancellingDate] = useState<{ e: AdminEvent; date: EventDate } | null>(null);
+   const [cancelling, setCancelling] = useState<AdminEvent | null>(null);
+ 
+@@ -137,6 +137,7 @@ export function EventsSection() {
+                       <td>
+                         <span className="flex flex-col items-start gap-1">
+                           <Badge tone={tone}>{label}</Badge>
++                          {e.status==='PUBLISHED' && <button type="button" className={ROW_BTN} onClick={()=>setOpen(open?.id===e.id&&open.kind==='covers'?null:{id:e.id,kind:'covers'})}>Cover history</button>}
+                           {e.salesPaused && e.status !== 'CANCELLED' ? <Badge tone="amber">Sales paused</Badge> : null}
+                           {e.spotlight ? <Badge tone="green">Home spotlight</Badge> : null}
+                         </span>
+@@ -224,6 +225,8 @@ export function EventsSection() {
+                       <InlineRow cols={COLS}>
+                         <DateList e={e} dates={multi} onCancel={(date) => setCancellingDate({ e, date })} />
+                       </InlineRow>
++                    ) : open?.id === e.id && open.kind === 'covers' ? (
++                      <InlineRow cols={COLS}><CoverHistory id={e.id} changed={list.reload} /></InlineRow>
+                     ) : open?.id === e.id && open.kind === 'schedule' ? (
+                       <InlineRow cols={COLS}>
+                         <AdminSchedule e={e} />
+@@ -329,6 +332,27 @@ function DateList({ e, dates, onCancel }: { e: AdminEvent; dates: EventDate[]; o
+ }
+ 
+ /** The event's schedule, read-only, with places booked and session check-ins (GET /admin/events/:id/schedule). */
++function CoverHistory({id,changed}:{id:string;changed:()=>void}){
++  const history=useApi<{updatedAt:string;history:{id:string;imageUrl:string|null;createdAt:string}[]}>('/admin/events/'+id+'/cover-history')
++  const [busy,setBusy]=useState(false),[message,setMessage]=useState('')
++  async function restore(revision:string){
++    if(!history.data||busy)return
++    setBusy(true)
++    try {
++      await api('/admin/events/'+id+'/cover-history/'+revision+'/restore',{method:'POST',body:{expectedUpdatedAt:history.data.updatedAt}})
++      setMessage('Cover restored.');history.reload();changed()
++    } catch(e){setMessage(e instanceof Error?e.message:'Could not restore this cover.')}
++    finally{setBusy(false)}
++  }
++  return <div><strong>Cover history</strong>{history.error&&<p role="alert">{history.error}</p>}
++    {!history.data&&!history.error&&<p>Loading covers…</p>}
++    {history.data&&!history.data.history.length&&<p>No previous covers recorded.</p>}
++    {history.data?.history.map(row=><div key={row.id} className="flex items-center gap-3 py-2">
++      {row.imageUrl&&<img src={row.imageUrl} alt="Previous event cover" width={96} height={54}/>}
++      <time dateTime={row.createdAt}>{new Date(row.createdAt).toLocaleString()}</time>
++      <button className={ROW_BTN} type="button" disabled={busy} onClick={()=>void restore(row.id)}>Restore this cover</button></div>)}
++    {message&&<p role="status">{message}</p>}</div>
++}
+ function AdminSchedule({ e }: { e: AdminEvent }) {
+   const res = useApi<{ items: OrganizerItem[] }>(`/admin/events/${e.id}/schedule`);
+   if (res.error) return <p className={`${CELL_SUB} m-0`}>{res.error}</p>;

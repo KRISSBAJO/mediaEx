@@ -263,6 +263,11 @@ export async function transform(req: Request, a: AssetRow, access: DeliveryAcces
   if (t.wm) {
     wm = await getAssetRow(t.wm, a.organizationId)
     if (!wm || wm.type !== 'image' || wm.status !== 'ready') throw new HttpError(400, 'wm must be a ready image in the same workspace.')
+    if (wm.retired || (wm.rightsExpireAt && new Date(wm.rightsExpireAt).getTime()<=Date.now())) return new Response(null,{status:404,headers:{'Cache-Control':'no-store'}})
+    if (wm.rightsExpireAt && access !== 'member') {
+      const expiry=Math.floor(new Date(wm.rightsExpireAt).getTime()/1000)
+      access={expiresAt:typeof access==='object'?Math.min(access.expiresAt,expiry):expiry}
+    }
     if (wm.playback === 'signed' || !isPublic(wm)) {
       if (!(await isMember())) return new Response(null, { status: 404, headers: { 'Cache-Control': 'private, no-store' } })
       access = 'member'
@@ -297,12 +302,12 @@ export async function transform(req: Request, a: AssetRow, access: DeliveryAcces
         const db = await pool.connect()
         try {
           await db.query('begin')
-          const { rows: current } = await db.query<AssetRow>(`select id,"originalKey","readyAt","storageBackend",playback,moderation,"takenDown"
+          const { rows: current } = await db.query<AssetRow>(`select id,"originalKey","readyAt","storageBackend",playback,moderation,"takenDown",retired,"rightsExpireAt"
             from asset where id=any($1) and "deletedAt" is null and status='ready' order by id for share`, [inputs.map(row => row.id)])
           for (const input of inputs) {
             const latest = current.find(row => row.id === input.id)
             if (!latest || latest.originalKey !== input.originalKey || latest.storageBackend !== input.storageBackend ||
-                latest.playback !== input.playback || latest.moderation !== input.moderation || latest.takenDown !== input.takenDown ||
+                latest.retired !== input.retired || new Date(latest.rightsExpireAt??0).getTime() !== new Date(input.rightsExpireAt??0).getTime() || latest.playback !== input.playback || latest.moderation !== input.moderation || latest.takenDown !== input.takenDown ||
                 new Date(latest.readyAt ?? 0).getTime() !== new Date(input.readyAt ?? 0).getTime())
               throw new HttpError(409, 'The image changed while rendering. Retry the request.')
           }

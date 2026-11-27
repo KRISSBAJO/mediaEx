@@ -6,6 +6,9 @@ import type { MediaAsset, MediaStatus, MediaType, ModerationFlag, ModerationStat
 import type { UploadPolicy } from './types.mts'
 
 export type AssetRow = {
+  retired?: boolean
+  sha256?:string|null
+  rightsExpireAt?: Date | null
   revisionId: string
   uploadPolicy: UploadPolicy | null
   uploadExpiresAt: Date | null
@@ -78,6 +81,7 @@ export function toDTO(a: AssetRow): MediaAsset {
     stage: a.stage,
     progress: Math.round(a.progress * 10) / 10,
     error: a.error,
+    revisionId:a.revisionId, sha256:a.sha256??null,
     fileName: a.fileName,
     size: Number(a.size),
     outputSize: Number(a.outputSize),

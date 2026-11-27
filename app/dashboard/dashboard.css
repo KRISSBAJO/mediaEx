@@ -5341,3 +5341,31 @@ b .apill {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Workspace pages share a title row, a reading measure and a responsive section gap. */
+.content.workspace-content {
+  --section-gap: clamp(20px, 2.2vw, 36px);
+  padding-block-start: clamp(24px, 4vw, 56px);
+}
+.workspace-content .page-head {
+  align-items: center;
+  padding-bottom: clamp(18px, 2vw, 30px);
+  margin-bottom: var(--section-gap);
+  border-bottom: 1px solid var(--line);
+}
+.workspace-content .page-head h1 {
+  font-size: clamp(26px, 2.5vw, 38px);
+  letter-spacing: -0.04em;
+  line-height: 1.14;
+  overflow-wrap: anywhere;
+}
+.workspace-content .page-head p { max-width: 60ch; }
+.workspace-content :is(.grid-2, .grid-3, .stack) { gap: var(--section-gap); }
+.overview-section-head { margin-bottom: 16px; }
+.overview-section-head h2 { font-size: 19px; letter-spacing: -0.02em; }
+.overview-section-head p { color: var(--muted); font-size: 14px; }
+.workspace-content section[aria-labelledby="overview-audience"] { margin-bottom: var(--section-gap); }
+@media (max-width: 640px) {
+  .workspace-content .page-head { align-items: flex-start; flex-direction: column; gap: 14px; }
+  .workspace-content .page-actions { max-width: 100%; }
+}

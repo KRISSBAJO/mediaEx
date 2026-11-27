@@ -286,3 +286,36 @@ The code is in `backend/media/webhooks.mts` (endpoints, signing, dispatcher, `em
 - `app/globals.css`, `app/dashboard/dashboard.css` — design tokens and styles
 
 Motion respects `prefers-reduced-motion`.
+
+## Native object buckets
+
+MediaEX can store arbitrary files directly on its persistent volume through its workspace API. Set `MEDIA_DIR` to a mounted directory in production. A single backend host owns that volume. Bucket names, object keys and bytes live together in per-workspace SQLite files under `.native-buckets` inside that directory. MediaEX uses the existing workspace database for API keys, plan limits and coordination. No external object storage account or server is required.
+
+Use a workspace bearer key on every request. Read and upload keys can list and download objects. A full key can also create and delete buckets and write objects. Publication keys are restricted to their application references.
+
+| Method | Path | Operation |
+| --- | --- | --- |
+| GET | `/api/v1/buckets` | List workspace buckets |
+| PUT or DELETE | `/api/v1/buckets/{name}` | Create a bucket or remove an empty one |
+| GET | `/api/v1/buckets/{name}/objects?prefix=&after=&limit=100` | List object names, sizes and ETags. Pass the returned nextAfter as after for the next page. |
+| PUT | `/api/v1/buckets/{name}/objects?key={encoded-key}` | Write the raw request body, up to 8 MiB. Send If-None-Match with value * for create-only writes. |
+| GET or HEAD | `/api/v1/buckets/{name}/objects?key={encoded-key}` | Download bytes or inspect headers, with single byte-range support |
+| DELETE | `/api/v1/buckets/{name}/objects?key={encoded-key}` | Remove an object |
+
+Object writes replace the current bytes atomically. Native bucket objects and staged parts count toward workspace storage. Bucket objects have a separate lifecycle from Library media assets and currently have no object version history. To make a consistent cold backup, stop all writers and copy the full volume including hidden files. Restore it together with the corresponding workspace database to retain workspace identities and access. This API uses MediaEX bearer keys. AWS CLI compatibility remains open.
+
+### Resumable native uploads
+
+Use `/api/v1/buckets/{name}/uploads` with the operations below. Store the upload ID client-side across interruptions. The default 1 MiB part fits the Hoist relay's documented general API body limit. On an ingress configured for larger requests, pass `partSize=8388608` when starting to select 8 MiB parts. The last part contains the remaining bytes. The protocol accepts up to 10,000 parts per object, subject to quota and available disk space.
+
+| Method | Query | Operation |
+| --- | --- | --- |
+| POST | `key=…&size=…` | Start an upload with the exact total byte count. Returns uploadId, partSize, size and expiresAt (Unix milliseconds). Send If-None-Match with value * to require the destination to be empty at publication. |
+| PUT | `uploadId=…&part=1&sha256=…` | Store one numbered part as raw bytes. The optional checksum is lowercase hexadecimal SHA-256. Repeating identical bytes acknowledges the same part. Conflicting bytes return 409. |
+| GET | `uploadId=…` | Read the ordered part numbers, sizes and checksums. Verify local chunks against acknowledged parts and resend missing parts in any order. |
+| POST | `uploadId=…` | Publish all parts atomically under the original key. Missing parts return 409. Repeating completion returns the same receipt while that version is current. The multipart ETag identifies the ordered part hashes. |
+| DELETE | `uploadId=…` | Abort an unfinished upload and release its staged storage. |
+
+Each acknowledged part extends the session for seven days. Expired sessions become unavailable and the next native bucket write in that workspace reclaims their staged data. Readers can keep streaming the previous version during replacement. GET can stream a whole multipart object or a range across parts. Use a persistent local filesystem supporting SQLite WAL locks, with all replicas serving a workspace pinned to that same storage owner.
+
+The deployed recovery drill uses a dedicated temporary bucket and a video larger than 8 MiB. Set MEDIAEX_URL, MEDIAEX_MONITOR_WORKSPACE and MEDIAEX_MONITOR_KEY for the designated pilot workspace. Run `node scripts/check-native-multipart.mjs seed VIDEO CHECKPOINT`. After the first part is acknowledged, restart the backend through its deployment platform with the same volume attached. Run `node scripts/check-native-multipart.mjs recover VIDEO CHECKPOINT`. Recovery verifies the returned SHA-256, a cross-part range and repeated completion, then removes its test object and bucket. Record the platform restart and volume identifier alongside the drill output.
