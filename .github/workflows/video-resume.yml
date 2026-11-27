@@ -1,0 +1,30 @@
+name: MediaEX video resume and playback
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '42 8 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: mediaex-video-monitor
+  cancel-in-progress: false
+jobs:
+  video-resume:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - run: command -v ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
+
+      - run: node scripts/check-video-resume.mjs
+        env:
+          MEDIAEX_URL: ${{ vars.MEDIAEX_MONITOR_URL }}
+          MEDIAEX_MONITOR_WORKSPACE: ${{ vars.MEDIAEX_MONITOR_WORKSPACE }}
+          MEDIAEX_MONITOR_KEY: ${{ secrets.MEDIAEX_MONITOR_KEY }}
+
+
