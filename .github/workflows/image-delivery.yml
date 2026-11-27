@@ -10,6 +10,11 @@ concurrency:
   cancel-in-progress: false
 jobs:
   image-delivery:
+    name: Image delivery (${{ matrix.profile }})
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [small, phone]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -23,6 +28,7 @@ jobs:
       - run: node --test scripts/test-image-delivery-monitor.mjs
       - run: node scripts/check-image-delivery.mjs
         env:
+          MEDIAEX_IMAGE_PROFILE: ${{ matrix.profile }}
           MEDIAEX_URL: ${{ vars.MEDIAEX_MONITOR_URL }}
           MEDIAEX_MONITOR_WORKSPACE: ${{ vars.MEDIAEX_MONITOR_WORKSPACE }}
           MEDIAEX_MONITOR_KEY: ${{ secrets.MEDIAEX_MONITOR_KEY }}
