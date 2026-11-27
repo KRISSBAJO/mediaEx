@@ -5,28 +5,41 @@ import path from 'node:path'
 
 const [phase, root] = process.argv.slice(2)
 assert.ok(['source', 'replacement'].includes(phase) && path.isAbsolute(root))
-// Feed read-only restored rows to the route handler without opening a database socket.
-let input = ''
-for await (const chunk of process.stdin) input += chunk
-const fixture = JSON.parse(input)
-assert.equal(fixture.assets.length, 2)
-assert.match(fixture.secret, /^[0-9a-f]{64}$/)
+// Construct the connection from this drill's paths, independently of any operator settings.
+const live = process.argv[4] === '--live-db'
+if (live) {
+  const db = path.join(root, phase, 'db')
+  const password = await readFile(path.join(root, 'password'), 'utf8')
+  assert.match(password, /^[0-9a-f]{64}$/)
+  process.env.DATABASE_URL = 'postgresql://drill:' + password + '@localhost/postgres?host=' + encodeURIComponent(db)
+}
 process.env.MEDIA_DIR = path.join(root, phase, 'media')
 const { pool, auth } = await import('../backend/auth.mts')
 const { handleMedia } = await import('../backend/media/routes.mts')
 const { playbackLinks } = await import('../backend/media/playback.mts')
 const { getAssetRow } = await import('../backend/media/assets.mts')
 
-auth.api.getSession = async () => null // all viewers in this fixture are anonymous
-pool.connect = () => { throw new Error('Offline fixture cannot open database connections') }
-pool.query = async (sql, params) => {
-  if (sql.includes('from "asset" a left join "user"')) {
-    return { rows: fixture.assets.filter(row => row.id === params[0] && !row.deletedAt) }
+if (live) {
+  const result = await pool.query("select current_setting('data_directory') as dir, inet_server_addr() as addr")
+  assert.equal(result.rows[0].dir, path.join(root, phase, 'db'))
+  assert.equal(result.rows[0].addr, null)
+} else {
+  let input = ''
+  for await (const chunk of process.stdin) input += chunk
+  const fixture = JSON.parse(input)
+  assert.equal(fixture.assets.length, 2)
+  assert.match(fixture.secret, /^[0-9a-f]{64}$/)
+  auth.api.getSession = async () => null // all viewers in this fixture are anonymous
+  pool.connect = () => { throw new Error('Offline fixture cannot open database connections') }
+  pool.query = async (sql, params) => {
+    if (sql.includes('from "asset" a left join "user"')) {
+      return { rows: fixture.assets.filter(row => row.id === params[0] && !row.deletedAt) }
+    }
+    if (sql.includes('returning "playbackSecret"') && params[0] === 'pilot') {
+      return { rows: [{ playbackSecret: fixture.secret }] }
+    }
+    throw new Error('Unexpected database operation in offline route fixture')
   }
-  if (sql.includes('returning "playbackSecret"') && params[0] === 'pilot') {
-    return { rows: [{ playbackSecret: fixture.secret }] }
-  }
-  throw new Error('Unexpected database operation in offline route fixture')
 }
 
 const links = path.join(root, 'viewer-links.json')

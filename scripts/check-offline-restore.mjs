@@ -9,7 +9,7 @@ import { RECOVERY_SCHEMA } from '../backend/media/recovery-schema.mts'
 import { MEDIA_SCHEMA } from '../backend/media/schema.mts'
 
 // Offline fixture drill. Both PostgreSQL and media are quiescent at the snapshot point.
-// Single-user mode needs no database listener. Route checks use rows exported from each cold cluster.
+// Route checks open only a private Unix socket in the disposable cluster directory.
 const scratch = await mkdtemp(path.join(process.env.RESTORE_DRILL_TMP || tmpdir(), 'mediaex-restore-'))
 const source = path.join(scratch, 'source')
 const replacement = path.join(scratch, 'replacement')
@@ -22,7 +22,7 @@ function run(command, args, input, env = process.env) {
 function query(host, sql) {
   return run('postgres', ['--single', '-D', path.join(host, 'db'), 'postgres'], sql + '\n')
 }
-async function verifyLinks(phase) {
+async function verifyExportedLinks(phase) {
   const host = path.join(scratch, phase)
   const raw = query(host, `select encode(convert_to(json_build_object('assets', (select json_agg(row_to_json(a)) from asset a),
     'secret', (select "playbackSecret" from workspace_setting where "organizationId"='pilot'))::text,'UTF8'),'hex') as fixture;`.replace(/\s+/g, ' '))
@@ -32,6 +32,25 @@ async function verifyLinks(phase) {
   run(process.execPath, [script, phase, scratch], Buffer.from(payload, 'hex'), {
     PATH: process.env.PATH, BETTER_AUTH_SECRET: randomBytes(32).toString('hex'),
   })
+}
+async function verifyLinks(phase) {
+  if (!process.argv.includes('--live-db')) return verifyExportedLinks(phase)
+  const db = path.join(scratch, phase, 'db')
+  const script = fileURLToPath(new URL('./verify-restored-links.mjs', import.meta.url))
+  const log = path.join(scratch, phase + '.log')
+  try {
+    run('pg_ctl', ['-D', db, '-l', log, '-o', "-c listen_addresses='' -k . -p 5432", '-w', 'start'])
+  } catch (error) {
+    console.error(await readFile(log, 'utf8').catch(() => 'No fixture database log'))
+    throw error
+  }
+  try {
+    run(process.execPath, [script, phase, scratch, '--live-db'], undefined, {
+      PATH: process.env.PATH, BETTER_AUTH_SECRET: randomBytes(32).toString('hex'),
+    })
+  } finally {
+    run('pg_ctl', ['-D', db, '-m', 'fast', '-w', 'stop'])
+  }
 }
 async function inventory(folder) {
   const files = await readdir(folder, { recursive: true, withFileTypes: true })

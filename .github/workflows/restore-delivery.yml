@@ -21,4 +21,4 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-16 ffmpeg
       - name: Recover catalog, media bytes and existing viewer links
-        run: PATH="/usr/lib/postgresql/16/bin:$PATH" node --experimental-strip-types scripts/check-offline-restore.mjs
+        run: PATH="/usr/lib/postgresql/16/bin:$PATH" node --experimental-strip-types scripts/check-offline-restore.mjs --live-db
