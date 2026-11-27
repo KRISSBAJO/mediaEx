@@ -22,14 +22,19 @@ const NAV = [
       { href: '/dashboard', label: 'Overview', icon: 'overview' },
       { href: '/dashboard/library', label: 'Library', icon: 'library' },
       { href: '/dashboard/uploads', label: 'Uploads', icon: 'upload' },
-      { href: '/dashboard/trash', label: 'Trash', icon: 'trash' },
       { href: '/dashboard/review', label: 'Review', icon: 'shieldCheck' },
+      { href: '/dashboard/trash', label: 'Trash', icon: 'trash' },
+    ],
+  },
+  {
+    group: 'Insights',
+    items: [
       { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics' },
       { href: '/dashboard/usage', label: 'Usage and errors', icon: 'gauge' },
     ],
   },
   {
-    group: 'Build',
+    group: 'Tools',
     items: [
       { href: '/dashboard/developers', label: 'Developers', icon: 'code' },
       { href: '/dashboard/settings', label: 'Settings', icon: 'settings' },
@@ -130,8 +135,10 @@ function Sidebar({ onNavigate, onNewWorkspace }: { onNavigate?: () => void; onNe
         onNavigate={onNavigate}
         isActive={(href) => isActive(path, href)}
         groups={[
-          ...NAV.map((g) => ({ ...g, items: g.items.map((it) => ({ ...it, count: counts[it.href] })) })),
-          { group: 'Resources', items: [{ href: '/#developers', label: 'API overview', icon: 'book', external: true }] },
+          ...NAV.map(g => ({ ...g, items: [
+            ...g.items.map(it => ({ ...it, count: counts[it.href] })),
+            ...(g.group === 'Tools' ? [{ href: '/#developers', label: 'API overview', icon: 'book', external: true }] : []),
+          ] })),
         ]}
       />
 
@@ -397,7 +404,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
     <>
     {imp && <ImpersonationBar name={account.user.name} email={account.user.email} by={imp.by} expiresAt={imp.expiresAt} />}
     <div className={`app ${drawer ? 'drawer-open' : ''}`}>
-      <aside className="side" aria-label="Sidebar">
+      <aside className="side workspace-side" aria-label="Sidebar">
         <Sidebar onNavigate={() => setDrawer(false)} onNewWorkspace={() => setNewWs(true)} />
       </aside>
       <div className="side-scrim" onClick={() => setDrawer(false)} aria-hidden="true" />
