@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { isActive, type MediaAsset } from '@/lib/media/types'
 import { bytes, compact, type Range } from '@/lib/sample'
 import { useAnalytics } from './Analytics'
+import { canManage, useAccount } from '../account'
 import { useMedia } from '../media'
 import { Card, PageHead, RANGES, Segmented, StatTile, StatusBadge, Thumb } from '../ui'
 
@@ -21,6 +22,8 @@ function displayTitle(asset: MediaAsset) {
 }
 
 export default function Overview() {
+  const { workspace } = useAccount()
+  const manage = canManage(workspace.role)
   const { assets } = useMedia()
   const [range, setRange] = useState<Range>('30d')
   const { data, error } = useAnalytics(range)
@@ -66,6 +69,7 @@ export default function Overview() {
             <div className="empty"><p>Your uploads will appear here.</p><Link href="/dashboard/uploads" className="btn btn-primary btn-sm">Upload files</Link></div>
           )}
         </Card>
+        <div className="overview-side">
         <Card title="Upload status" action={<Link className="panel-link" href="/dashboard/uploads">View uploads →</Link>}>
           {jobs.length ? (
             <ul className="overview-jobs">
@@ -78,6 +82,14 @@ export default function Overview() {
             </ul>
           ) : <p className="quiet-note">No active or failed uploads.</p>}
         </Card>
+        <Card title="Workspace tools" flush>
+          <nav className="overview-tools" aria-label="Workspace tools">
+            <Link href="/dashboard/usage#customer-storage">Storage &amp; S3</Link>
+            {manage && <Link href="/dashboard/settings?tab=backups">Backup copies</Link>}
+            {manage && <Link href="/dashboard/developers?tab=keys">API keys</Link>}
+          </nav>
+        </Card>
+        </div>
       </div>
 
     </div>

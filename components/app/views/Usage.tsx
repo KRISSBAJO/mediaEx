@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import type { OperationsReport, OperationalError } from '@/backend/media/operations.mts'
 import { bytes } from '@/lib/sample'
-import { useAccount } from '../account'
+import { canManage, useAccount } from '../account'
 import { request } from '../library'
 import { Card, PageHead, StatTile } from '../ui'
 
@@ -20,6 +20,7 @@ function ErrorAction({ issue }: { issue: OperationalError }) {
 }
 
 function Report({ data }: { data: OperationsReport }) {
+  const { workspace } = useAccount()
   const storage = [
     ['Original files', data.originalBytes],
     ['Encoded outputs', data.encodedBytes],
@@ -38,12 +39,15 @@ function Report({ data }: { data: OperationsReport }) {
       <StatTile label="Storage redirects over 30 days" value={(data.bucketRedirects ?? 0).toLocaleString()} />
       <StatTile label="Player delivery · 30 days" value={bytes(data.playerBytes)} />
     </div>
-    {credential && <Card title="Storage credential" meta={credential.state === 'active' ? 'Version ' + credential.version : 'OpenBao'}>
-      {credential.state === 'active' ? <>
+    <section id="customer-storage" aria-label="Customer-owned S3">
+    <Card title="Customer-owned S3" meta={credential?.state === 'active' ? 'Version ' + credential.version : 'Storage pilot'}>
+      {!credential ? <p>A site administrator can help connect a customer-owned bucket. Workspace owners and admins can see credential status here once their workspace is enrolled in the pilot.</p> : credential.state === 'active' ? <>
         <p>{credential.actor} verified upload, encoding and playback on {new Date(credential.checkedAt).toLocaleString()}.</p>
         {credential.earliestRetirement && <p>Keep the key for version {credential.previousVersion} active until at least {new Date(credential.earliestRetirement).toLocaleString()}. Check in-flight work before retiring it.</p>}
       </> : <p>{credential.state === 'unavailable' ? 'Credential status is unavailable.' : 'Waiting for the first verified storage credential.'}</p>}
-    </Card>}
+      {canManage(workspace.role) && <p><Link href="/dashboard/settings?tab=backups">Backup copies</Link> &middot; <Link href="/dashboard/settings?tab=retention">Retention settings</Link></p>}
+    </Card>
+    </section>
     <div className="grid-2 even">
       <Card title="Storage breakdown" meta="Includes files retained in Trash" flush>
         <div className="table-wrap"><table className="table">
@@ -90,7 +94,7 @@ export default function Usage() {
   }, [workspace.id, attempt])
   const current = result?.orgId === workspace.id && result.attempt === attempt ? result : null
   return <>
-    <PageHead title="Usage and errors"><button className="btn btn-ghost" type="button" disabled={!current} onClick={() => setAttempt(n => n + 1)}>Refresh</button></PageHead>
+    <PageHead title="Storage & usage"><button className="btn btn-ghost" type="button" disabled={!current} onClick={() => setAttempt(n => n + 1)}>Refresh</button></PageHead>
     {current?.error ? <p className="banner is-bad" role="alert">{current.error}</p>
       : current?.data ? <Report data={current.data} /> : <p className="quiet-note" role="status">Loading workspace usage…</p>}
   </>

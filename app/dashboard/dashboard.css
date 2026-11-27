@@ -5422,3 +5422,15 @@ b .apill {
     padding-inline-end: max(var(--gutter), calc(100% - var(--page-max) + var(--gutter)));
   }
 }
+
+.overview-side, .overview-tools { display: grid; gap: 1rem; }
+.overview-tools { gap: 0; }
+.overview-tools a { display: flex; justify-content: space-between; padding: .8rem 1.25rem; }
+.overview-tools a + a { border-top: 1px solid var(--line); }
+.overview-tools a::after { content: "\2192"; color: var(--muted); }
+.overview-tools a:hover { text-decoration: underline; }
+#customer-storage { scroll-margin-top: 5rem; }
+.preview-title { overflow-wrap: anywhere; }
+.preview-details summary { cursor: pointer; }
+.preview-details[open] > * + * { margin-top: 1rem; }
+.lib-preview .player-image .player-frame { aspect-ratio: auto; height: clamp(220px, 38vh, 420px); }

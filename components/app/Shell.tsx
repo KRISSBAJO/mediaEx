@@ -30,7 +30,7 @@ const NAV = [
     group: 'Insights',
     items: [
       { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics' },
-      { href: '/dashboard/usage', label: 'Usage and errors', icon: 'gauge' },
+      { href: '/dashboard/usage', label: 'Storage & usage', icon: 'gauge' },
     ],
   },
   {

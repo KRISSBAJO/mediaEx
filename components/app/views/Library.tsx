@@ -120,7 +120,8 @@ export default function Library() {
     const visible = new Set(list.map((a) => a.id))
     setSelected((s) => (([...s].every((x) => visible.has(x)) ? s : new Set([...s].filter((x) => visible.has(x))))))
   }, [list])
-  const previewed = list.find(asset => asset.id === preview)
+  const previewIndex = list.findIndex(asset => asset.id === preview)
+  const previewed = list[previewIndex]
   useEffect(() => {
     if (found && preview && !previewed) setPreview(null)
   }, [found, preview, previewed])
@@ -456,7 +457,9 @@ export default function Library() {
           )}
         </section>
 
-        {previewed && <Preview asset={previewed} onClose={() => setPreview(null)} />}
+        {previewed && <Preview asset={previewed} onClose={() => setPreview(null)}
+          previous={previewIndex > 0 ? () => setPreview(list[previewIndex - 1].id) : undefined}
+          next={previewIndex + 1 < list.length ? () => setPreview(list[previewIndex + 1].id) : undefined} />}
       </div>
 
       {dialog === 'move' && (

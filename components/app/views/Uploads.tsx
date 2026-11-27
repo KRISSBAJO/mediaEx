@@ -76,6 +76,7 @@ export default function Uploads() {
             ))}
           </select>
         </label>
+        <Link className="btn btn-ghost" href="/dashboard/usage">Storage &amp; usage</Link>
       </PageHead>
 
       {presetError && <p role="alert">{presetError} <button type="button" className="btn btn-quiet btn-sm" onClick={() => setRefresh(n => n + 1)}>Try again</button></p>}

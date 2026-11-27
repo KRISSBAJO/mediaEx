@@ -13,27 +13,33 @@ import { ModerationBadge, StatusBadge } from '../ui'
 import ShareLink from '../ShareLink'
 import { CollectDialog, TagInput } from './dialogs'
 
-export default function Preview({ asset: a, onClose }: { asset: MediaAsset; onClose: () => void }) {
+export default function Preview({ asset: a, onClose, previous, next }: { asset: MediaAsset; onClose: () => void; previous?: () => void; next?: () => void }) {
+  return <aside className="lib-preview" aria-label={`Preview of ${a.title}`}>
+    <header className="lib-preview-head">
+      <h2>Preview</h2>
+      <button type="button" className="icon-btn is-quiet" disabled={!previous} onClick={previous} aria-label="Previous asset">&#8592;</button>
+      <button type="button" className="icon-btn is-quiet" disabled={!next} onClick={next} aria-label="Next asset">&#8594;</button>
+      <button type="button" className="icon-btn is-quiet" onClick={onClose} aria-label="Close preview"><Icon name="x" size={16} /></button>
+    </header>
+    <PreviewBody key={a.id} asset={a} />
+  </aside>
+}
+
+function PreviewBody({ asset: a }: { asset: MediaAsset }) {
   const media = useMedia()
   const lib = useLibrary()
   const [collecting, setCollecting] = useState(false)
   const inCollections = lib.collections.filter((c) => a.collectionIds.includes(c.id))
 
   return (
-    <aside className="lib-preview" aria-label={`Preview of ${a.title}`}>
-      <header className="lib-preview-head">
-        <h2 title={a.title}>{a.title}</h2>
-        <button type="button" className="icon-btn is-quiet" aria-label="Close preview" onClick={onClose}>
-          <Icon name="x" size={16} />
-        </button>
-      </header>
-
+    <>
       <div className="lib-preview-body">
         <MediaPlayer asset={a} corners={false} />
 
+        <strong className="preview-title">{a.title}</strong>
         <div className="lib-preview-actions">
           <Link href={`/dashboard/library/${a.id}`} className="btn btn-primary btn-sm">
-            Open
+            Open asset details
           </Link>
           <ShareLink asset={a} />
           {a.status !== 'uploading' && (
@@ -43,6 +49,8 @@ export default function Preview({ asset: a, onClose }: { asset: MediaAsset; onCl
           )}
         </div>
 
+        <details className="preview-details">
+          <summary>File details and organization</summary>
         <dl className="lib-facts">
           <div>
             <dt>Status</dt>
@@ -110,9 +118,10 @@ export default function Preview({ asset: a, onClose }: { asset: MediaAsset; onCl
             </button>
           </div>
         </div>
+        </details>
       </div>
 
       {collecting && <CollectDialog count={1} onClose={() => setCollecting(false)} onPick={(cid) => lib.collect(cid, [a.id])} />}
-    </aside>
+    </>
   )
 }
