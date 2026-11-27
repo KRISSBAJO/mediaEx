@@ -6,6 +6,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { guessType, isActive, type MediaAsset, type WorkspaceAssetSummary } from '@/lib/media/types'
+import { lookupResume } from '@/lib/media/upload-resume'
 import { useAccount } from './account'
 import { toast } from './ui'
 
@@ -271,21 +272,21 @@ export function MediaProvider({ initial, initialSummary, children }: { initial: 
         // an earlier upload of this same file that stopped part-way: carry on from where it got to
         // (the server may send smaller files in parts too, so any size can have one)
         const earlier = readResumes()[fp]
-        let resumed: { plan: MultipartUpload; have: Set<number> } | null = null
-        if (earlier) {
-          const res = await fetch(`/api/uploads/${earlier}/parts`, { cache: 'no-store' })
-          if (res.ok) {
-            const r = (await res.json()) as { partSize: number; partCount: number; uploaded: { number: number }[] }
-            resumed = { plan: { kind: 'multipart', partSize: r.partSize, partCount: r.partCount, parts: `/api/uploads/${earlier}/parts` }, have: new Set(r.uploaded.map((p) => p.number)) }
-            assetId = earlier
-            patchT(t.key, { assetId, resumable: true, resumed: true })
-          } else writeResume(fp, null)
+        multipart = Boolean(earlier) // keep the saved session if lookup fails
+        const resumed = earlier ? await lookupResume(earlier, file.size) : null
+        if (resumed?.kind === 'completed') {
+          writeResume(fp, null)
+          put(resumed.asset)
+          patchT(t.key, { assetId: earlier, state: 'done', loaded: file.size })
+          return
         }
-
         if (resumed) {
-          multipart = true
-          await sendParts(t.key, file, assetId!, resumed.plan, resumed.have)
+          assetId = earlier
+          patchT(t.key, { assetId, resumable: true, resumed: true })
+          await sendParts(t.key, file, assetId, resumed.plan, resumed.have)
         } else {
+          multipart = false
+          if (earlier) writeResume(fp, null)
           const { asset, upload } = await json<{ asset: MediaAsset; upload: SingleUpload | MultipartUpload }>(
             await fetch('/api/uploads', {
               method: 'POST',
