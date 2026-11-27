@@ -5364,7 +5364,6 @@ b .apill {
 .overview-section-head { margin-bottom: 16px; }
 .overview-section-head h2 { font-size: 19px; letter-spacing: -0.02em; }
 .overview-section-head p { color: var(--muted); font-size: 14px; }
-.workspace-content section[aria-labelledby="overview-audience"] { margin-bottom: var(--section-gap); }
 @media (max-width: 640px) {
   .workspace-content .page-head { align-items: flex-start; flex-direction: column; gap: 14px; }
   .workspace-content .page-actions { max-width: 100%; }
@@ -5385,9 +5384,6 @@ b .apill {
 .overview-jobs { list-style: none; }
 .overview-jobs li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding-block: 12px; }
 .overview-jobs li + li { border-top: 1px solid var(--line); }
-.overview-numbers { display: flex; gap: clamp(36px, 8vw, 120px); padding-block: 5px; }
-.overview-numbers dt { font-size: 13px; color: var(--muted); }
-.overview-numbers dd { margin: 2px 0 0; font-size: clamp(24px, 2vw, 32px); letter-spacing: -.04em; }
 @media (max-width: 1050px) { .overview-work { grid-template-columns: 1fr; } }
 @media (max-width: 580px) {
   .overview-uploads { gap: 8px; padding: 12px; }
@@ -5400,7 +5396,7 @@ b .apill {
 .workspace-side .side-nav { gap: 14px; }
 .workspace-side .side-group { gap: 2px; }
 .workspace-side .side-label { padding: 4px 12px; color: #acabb2; letter-spacing: .075em; }
-.workspace-side .side-nav a { height: 40px; padding-inline: 12px; color: #e4e3e7; font-size: 15px; font-weight: 500; }
+.workspace-side .side-nav a { height: 40px; padding-inline: 12px; color: #e4e3e7; font-size: 14px; font-weight: 500; }
 .workspace-side .side-nav a > svg:first-child { width: 18px; height: 18px; color: #bcbac2; }
 .workspace-side .side-nav a:hover { background: #27272a; color: white; }
 .workspace-side .side-nav a[aria-current="page"] {
