@@ -90,6 +90,13 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   if (expectedToken && (typeof supplied !== 'string' || !timingSafeEqual(expectedToken, digest(supplied)))) {
     return json(res, 403, { error: 'Forbidden' })
   }
+  const requestId = req.headers['x-mediaex-request-id']
+  if (/^\/api\/(?:v1\/)?uploads(?:\/|$)/.test(pathname) && typeof requestId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    res.setHeader('x-mediaex-request-id', requestId)
+    res.once('close', () => console.info(JSON.stringify({ event: 'mediaex.upload.backend', traceId: requestId,
+      status: res.headersSent ? res.statusCode : null, finished: res.writableFinished })))
+  }
   for (const header of Object.keys(req.headers)) {
     if (header === 'forwarded' || header.startsWith('x-forwarded-') || header === 'x-real-ip' || header === 'x-mediaex-service-token') delete req.headers[header]
   }
