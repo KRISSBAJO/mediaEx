@@ -33,10 +33,8 @@ async function verifyExportedLinks(phase) {
     PATH: process.env.PATH, BETTER_AUTH_SECRET: randomBytes(32).toString('hex'),
   })
 }
-async function verifyLinks(phase) {
-  if (!process.argv.includes('--live-db')) return verifyExportedLinks(phase)
+async function withFixtureDb(phase, work) {
   const db = path.join(scratch, phase, 'db')
-  const script = fileURLToPath(new URL('./verify-restored-links.mjs', import.meta.url))
   const log = path.join(scratch, phase + '.log')
   try {
     run('pg_ctl', ['-D', db, '-l', log, '-o', "-c listen_addresses='' -k . -p 5432", '-w', 'start'])
@@ -45,12 +43,20 @@ async function verifyLinks(phase) {
     throw error
   }
   try {
-    run(process.execPath, [script, phase, scratch, '--live-db'], undefined, {
+    const password = await readFile(path.join(scratch, 'password'), 'utf8')
+    work({
       PATH: process.env.PATH, BETTER_AUTH_SECRET: randomBytes(32).toString('hex'),
+      DATABASE_URL: 'postgresql://drill:' + password + '@localhost/postgres?host=' + encodeURIComponent(db),
     })
   } finally {
     run('pg_ctl', ['-D', db, '-m', 'fast', '-w', 'stop'])
   }
+}
+const live = process.argv.includes('--live-db')
+async function verifyLinks(phase) {
+  if (!live) return verifyExportedLinks(phase)
+  const script = fileURLToPath(new URL('./verify-restored-links.mjs', import.meta.url))
+  await withFixtureDb(phase, env => run(process.execPath, [script, phase, scratch, '--live-db'], undefined, env))
 }
 async function inventory(folder) {
   const files = await readdir(folder, { recursive: true, withFileTypes: true })
@@ -72,12 +78,20 @@ try {
   ff(['-f','lavfi','-i','testsrc2=size=128x72:rate=12','-t','2','-c:v','libx264','-g','12',path.join(video,'original.mp4')])
   ff(['-i',path.join(video,'original.mp4'),'-c','copy','-hls_time','1','-hls_list_size','0',path.join(video,'hls/index.m3u8')])
   const schema = (MEDIA_SCHEMA + RECOVERY_SCHEMA).replace(/--[^\n]*/g,'').replace(/\s+/g,' ')
+  if (live) {
+    const migrate = fileURLToPath(new URL('../backend/migrate.mts', import.meta.url))
+    await withFixtureDb('source', env => run(process.execPath, [migrate], undefined, env))
+  }
   query(source, [
+    ...(live ? [
+      `insert into organization (id, name, slug, "createdAt") values ('pilot', 'Fixture', 'fixture', now());`,
+    ] : [
     'create table organization (id text primary key);',
     'create table "user" (id text primary key, name text);',
     schema,
     'alter table asset add column "storageBackend" text not null default \'local\';',
     "insert into organization values ('pilot');",
+    ]),
     `insert into workspace_setting ("organizationId", "playbackSecret") values ('pilot','${randomBytes(32).toString('hex')}');`,
     "insert into asset(id,\"organizationId\",title,type,status,\"fileName\",\"originalKey\",\"thumbKey\",\"playlistKey\",playback) values ('ast_cover01','pilot','Venue','image','ready','original.jpg','pilot/cover/original.jpg','pilot/cover/thumb.jpg',null,'public'),('ast_video01','pilot','Trailer','video','ready','original.mp4','pilot/video/original.mp4',null,'pilot/video/hls/index.m3u8','signed');",
   ].join('\n'))

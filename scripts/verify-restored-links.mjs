@@ -5,14 +5,8 @@ import path from 'node:path'
 
 const [phase, root] = process.argv.slice(2)
 assert.ok(['source', 'replacement'].includes(phase) && path.isAbsolute(root))
-// Construct the connection from this drill's paths, independently of any operator settings.
+// The parent supplies only the disposable cluster connection in live mode.
 const live = process.argv[4] === '--live-db'
-if (live) {
-  const db = path.join(root, phase, 'db')
-  const password = await readFile(path.join(root, 'password'), 'utf8')
-  assert.match(password, /^[0-9a-f]{64}$/)
-  process.env.DATABASE_URL = 'postgresql://drill:' + password + '@localhost/postgres?host=' + encodeURIComponent(db)
-}
 process.env.MEDIA_DIR = path.join(root, phase, 'media')
 const { pool, auth } = await import('../backend/auth.mts')
 const { handleMedia } = await import('../backend/media/routes.mts')
