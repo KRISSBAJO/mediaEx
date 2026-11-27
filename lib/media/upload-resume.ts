@@ -31,3 +31,26 @@ export async function lookupResume(assetId: string, size: number, request = fetc
   }
   return { kind: 'active' as const, plan: { kind: 'multipart' as const, partSize, partCount, parts }, have }
 }
+
+// An offline transfer must release its queue slot as soon as the user cancels.
+export function waitForUploadRetry(signal: AbortSignal, delayMs: number, network: EventTarget, online: () => boolean) {
+  return new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>
+    function cleanup() {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', cancel)
+      network.removeEventListener('online', connected)
+    }
+    function cancel() {
+      cleanup()
+      reject(signal.reason)
+    }
+    function connected() {
+      timer = setTimeout(() => { cleanup(); resolve() }, delayMs)
+    }
+    if (signal.aborted) return cancel()
+    signal.addEventListener('abort', cancel, { once: true })
+    if (online()) connected()
+    else network.addEventListener('online', connected, { once: true })
+  })
+}

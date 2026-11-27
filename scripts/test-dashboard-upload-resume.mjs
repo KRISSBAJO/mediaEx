@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { lookupResume } from '../lib/media/upload-resume.ts'
+import { lookupResume, waitForUploadRetry } from '../lib/media/upload-resume.ts'
 
 const id = 'ast_example'
 const plan = { partSize: 4, partCount: 3, uploaded: [{number: 3, size: 2}] }
@@ -35,4 +35,22 @@ test('rejects inconsistent geometry and partial stored bytes', async () => {
   for (const invalid of [{...plan, partCount: 2}, {...plan, uploaded: [{number: 3, size: 1}]}]) {
     await assert.rejects(lookupResume(id, 10, async () => Response.json(invalid)), /does not match/)
   }
+})
+
+test('cancellation releases offline and backing-off retries without a reconnect', async () => {
+  for (const online of [false, true]) {
+    const controller = new AbortController()
+    const network = new EventTarget()
+    const waiting = waitForUploadRetry(controller.signal, 60000, network, () => online)
+    controller.abort(new Error('CANCELLED'))
+    await assert.rejects(waiting, /CANCELLED/)
+    network.dispatchEvent(new Event('online'))
+  }
+})
+
+test('reconnecting permits an interrupted transfer to retry', async () => {
+  const network = new EventTarget()
+  const waiting = waitForUploadRetry(new AbortController().signal, 0, network, () => false)
+  network.dispatchEvent(new Event('online'))
+  await waiting
 })
