@@ -112,6 +112,20 @@ export async function proxyMedia(request: Request) {
   }
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD'
 
+  const uploadPath = /^\/api\/(?:v1\/)?uploads(?:\/([^/]+)(?:\/(complete|parts)(?:\/(\d+))?)?)?\/?$/.exec(incoming.pathname)
+  const traceId = uploadPath && uploadPath[1] !== 'presets' ? crypto.randomUUID() : undefined
+  const started = Date.now()
+  if (traceId) headers.set('x-mediaex-request-id', traceId)
+
+  function trace(outgoing: Headers, status: number, source: string) {
+    if (!traceId || !uploadPath) return
+    const [, asset, operation, part] = uploadPath
+    const stage = part ? 'part' : operation || (asset ? 'transfer' : 'create')
+    outgoing.set('x-mediaex-request-id', traceId)
+    console.info(JSON.stringify({ event: 'mediaex.upload', traceId, stage, method: request.method,
+      source, status, elapsedMs: Date.now() - started }))
+  }
+
   try {
     const response = await backendFetch(incoming.pathname + incoming.search, {
       method: request.method, headers, body: hasBody ? request.body : undefined, duplex: hasBody ? 'half' : undefined, signal: request.signal,
@@ -124,11 +138,14 @@ export async function proxyMedia(request: Request) {
       const value = response.headers.get(name)
       if (value !== null) outgoing.set(name, value)
     }
+    trace(outgoing, response.status, traceId && response.headers.get('x-mediaex-request-id') === traceId ? 'backend' : 'upstream')
     if (!outgoing.has('cache-control')) outgoing.set('cache-control', 'private, no-store')
     return new Response(request.method === 'HEAD' ? null : response.body, { status: response.status, headers: outgoing })
   } catch {
+    const outgoing = new Headers({ 'cache-control': 'private, no-store' })
+    trace(outgoing, 503, 'proxy')
     return Response.json({ error: 'MediaEX media is temporarily unavailable. Try again in a moment.' }, {
-      status: 503, headers: { 'cache-control': 'private, no-store' },
+      status: 503, headers: outgoing,
     })
   }
 }
