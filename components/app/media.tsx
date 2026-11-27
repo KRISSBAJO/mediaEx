@@ -6,6 +6,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { guessType, isActive, type MediaAsset, type WorkspaceAssetSummary } from '@/lib/media/types'
+import { lookupResume, waitForUploadRetry } from '@/lib/media/upload-resume'
 import { useAccount } from './account'
 import { toast } from './ui'
 
@@ -87,8 +88,6 @@ function writeResume(fp: string, assetId: string | null) {
   }
 }
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
 /** PUT a blob with progress. Rejects with Error('CANCELLED') when aborted. */
 function putBlob(t: Target, blob: Blob, type: string, onProgress: (n: number) => void, track: (x: XMLHttpRequest | null) => void) {
   return new Promise<void>((resolve, reject) => {
@@ -115,7 +114,7 @@ export function MediaProvider({ initial, initialSummary, children }: { initial: 
   const files = useRef(new Map<string, File>())
   // every request in flight per transfer, so cancelling stops all of a multipart upload's parts
   const xhrs = useRef(new Map<string, Set<XMLHttpRequest>>())
-  const cancelled = useRef(new Set<string>())
+  const controllers = useRef(new Map<string, AbortController>())
   const started = useRef(new Set<string>())
   // the latest transfer list, for callbacks that run after an await
   const transfersRef = useRef(transfers)
@@ -206,7 +205,7 @@ export function MediaProvider({ initial, initialSummary, children }: { initial: 
   }
 
   /** sends a file's parts (skipping the ones already there), retrying each one, a few at a time */
-  const sendParts = async (key: string, file: File, assetId: string, plan: MultipartUpload, have: Set<number>) => {
+  const sendParts = async (key: string, file: File, controller: AbortController, plan: MultipartUpload, have: Set<number>) => {
     const sizeOf = (n: number) => (n < plan.partCount ? plan.partSize : file.size - plan.partSize * (plan.partCount - 1))
     let done = [...have].reduce((t, n) => t + sizeOf(n), 0)
     const inFlight = new Map<number, number>()
@@ -216,16 +215,16 @@ export function MediaProvider({ initial, initialSummary, children }: { initial: 
     const targets = new Map<number, Target>()
     const fetchTargets = async (numbers: number[]) => {
       const { parts } = await json<{ parts: (Target & { number: number })[] }>(
-        await fetch(plan.parts, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ numbers }) }),
+        await fetch(plan.parts, { signal: controller.signal, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ numbers }) }),
       )
       for (const t of parts) targets.set(t.number, t)
     }
-    let stop = false // one part gave up: the others stop too
     const one = async (n: number) => {
       for (let attempt = 1; ; attempt++) {
-        if (cancelled.current.has(key) || stop) throw new Error('CANCELLED')
+        controller.signal.throwIfAborted()
         try {
           if (!targets.has(n)) await fetchTargets(todo.filter((x) => !targets.has(x) && x >= n).slice(0, 50))
+          controller.signal.throwIfAborted()
           const start = (n - 1) * plan.partSize
           await putBlob(targets.get(n)!, file.slice(start, start + sizeOf(n)), '', (l) => (inFlight.set(n, l), report()), track(key))
           inFlight.delete(n)
@@ -234,12 +233,11 @@ export function MediaProvider({ initial, initialSummary, children }: { initial: 
           return
         } catch (e) {
           inFlight.delete(n)
+          controller.signal.throwIfAborted()
           if (e instanceof Error && e.message === 'CANCELLED') throw e
           if (attempt >= PART_TRIES) throw e
           targets.delete(n) // a signed URL may have expired: ask for a fresh one
-          // offline: wait for the connection to come back before trying again
-          if (typeof navigator !== 'undefined' && !navigator.onLine) await new Promise((r) => window.addEventListener('online', r, { once: true }))
-          await wait(Math.min(15000, 1000 * 2 ** (attempt - 1)))
+          await waitForUploadRetry(controller.signal, Math.min(15000, 1000 * 2 ** (attempt - 1)), window, () => navigator.onLine)
         }
       }
     }
@@ -251,7 +249,7 @@ export function MediaProvider({ initial, initialSummary, children }: { initial: 
         }),
       )
     } catch (e) {
-      stop = true
+      controller.abort(e)
       xhrs.current.get(key)?.forEach((x) => x.abort())
       throw e
     }
@@ -262,6 +260,8 @@ export function MediaProvider({ initial, initialSummary, children }: { initial: 
       const file = files.current.get(t.key)
       if (!file || started.current.has(t.key)) return
       started.current.add(t.key)
+      const controller = new AbortController()
+      controllers.current.set(t.key, controller)
       patchT(t.key, { state: 'uploading', loaded: 0 })
       const fp = JSON.stringify([workspace.id, t.presetId, t.folderId, fingerprint(file)])
       const big = file.size >= MULTIPART_FROM
@@ -271,21 +271,23 @@ export function MediaProvider({ initial, initialSummary, children }: { initial: 
         // an earlier upload of this same file that stopped part-way: carry on from where it got to
         // (the server may send smaller files in parts too, so any size can have one)
         const earlier = readResumes()[fp]
-        let resumed: { plan: MultipartUpload; have: Set<number> } | null = null
-        if (earlier) {
-          const res = await fetch(`/api/uploads/${earlier}/parts`, { cache: 'no-store' })
-          if (res.ok) {
-            const r = (await res.json()) as { partSize: number; partCount: number; uploaded: { number: number }[] }
-            resumed = { plan: { kind: 'multipart', partSize: r.partSize, partCount: r.partCount, parts: `/api/uploads/${earlier}/parts` }, have: new Set(r.uploaded.map((p) => p.number)) }
-            assetId = earlier
-            patchT(t.key, { assetId, resumable: true, resumed: true })
-          } else writeResume(fp, null)
+        multipart = Boolean(earlier) // keep the saved session if lookup fails
+        const resumed = earlier ? await lookupResume(earlier, file.size) : null
+        if (resumed?.kind === 'completed') {
+          writeResume(fp, null)
+          put(resumed.asset)
+          patchT(t.key, { assetId: earlier, state: 'done', loaded: file.size })
+          return
         }
-
         if (resumed) {
-          multipart = true
-          await sendParts(t.key, file, assetId!, resumed.plan, resumed.have)
+          assetId = earlier
+          controller.signal.throwIfAborted()
+          patchT(t.key, { assetId, resumable: true, resumed: true })
+          await sendParts(t.key, file, controller, resumed.plan, resumed.have)
         } else {
+          controller.signal.throwIfAborted()
+          multipart = false
+          if (earlier) writeResume(fp, null)
           const { asset, upload } = await json<{ asset: MediaAsset; upload: SingleUpload | MultipartUpload }>(
             await fetch('/api/uploads', {
               method: 'POST',
@@ -294,18 +296,20 @@ export function MediaProvider({ initial, initialSummary, children }: { initial: 
             }),
           )
           assetId = asset.id
+          controller.signal.throwIfAborted()
           put(asset)
           if (upload.kind === 'multipart') {
             multipart = true
             writeResume(fp, asset.id)
             patchT(t.key, { assetId, resumable: true })
-            await sendParts(t.key, file, asset.id, upload, new Set())
+            await sendParts(t.key, file, controller, upload, new Set())
           } else {
             patchT(t.key, { assetId })
             await putBlob(upload, file, file.type, (l) => patchT(t.key, { loaded: l }), track(t.key))
           }
         }
 
+        controller.signal.throwIfAborted()
         const done = await json<{ asset: MediaAsset }>(await fetch(`/api/uploads/${assetId}/complete`, { method: 'POST' }))
         writeResume(fp, null)
         put(done.asset)
@@ -318,7 +322,9 @@ export function MediaProvider({ initial, initialSummary, children }: { initial: 
           writeResume(fp, null)
           if (assetId) {
             const id = assetId
-            void fetch(`/api/assets/${id}`, { method: 'DELETE' }).then(() => setAssets((xs) => xs.filter((x) => x.id !== id)))
+            void fetch(`/api/assets/${id}`, { method: 'DELETE' })
+              .then(response => { if (response.ok) setAssets(xs => xs.filter(x => x.id !== id)) })
+              .catch(() => { /* The server expires abandoned uploads when offline. */ })
           }
         } else {
           // parts that arrived stay; adding the same file again picks up from here
@@ -326,7 +332,7 @@ export function MediaProvider({ initial, initialSummary, children }: { initial: 
         }
       } finally {
         xhrs.current.delete(t.key)
-        cancelled.current.delete(t.key)
+        controllers.current.delete(t.key)
         files.current.delete(t.key)
       }
     },
@@ -366,7 +372,7 @@ export function MediaProvider({ initial, initialSummary, children }: { initial: 
   const cancel = useCallback((key: string) => {
     const running = xhrs.current.get(key)
     if (started.current.has(key) && files.current.has(key)) {
-      cancelled.current.add(key)
+      controllers.current.get(key)?.abort(new Error('CANCELLED'))
       running?.forEach((x) => x.abort())
     } else {
       files.current.delete(key)
