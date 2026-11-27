@@ -16,14 +16,15 @@ const [width, height] = profile === 'small' ? [160, 120] : [1600, 1200]
 const runId = randomUUID()
 let stage = 'workspace'
 let assetId
+const requestIds = {}
 
 async function request(url, init = {}) {
   const response = await fetch(url, { ...init, signal: AbortSignal.timeout(45000), redirect: 'error' })
-  if (!response.ok) {
+  if (new URL(url).origin === origin && ['create', 'transfer', 'complete'].includes(stage)) {
     const id = response.headers.get('x-mediaex-request-id')
-    const suffix = id && /^[0-9a-f-]{36}$/i.test(id) ? ' (MediaEX request ' + id + ')' : ''
-    throw new Error('HTTP ' + response.status + suffix)
+    if (id && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) requestIds[stage] = id
   }
+  if (!response.ok) throw new Error('HTTP ' + response.status)
   return response
 }
 
@@ -73,25 +74,29 @@ async function run() {
       const thumb = await fetch(url, { signal: AbortSignal.timeout(45000) })
       if (!thumb.ok) throw new Error('HTTP ' + thumb.status)
       await sharp(Buffer.from(await thumb.arrayBuffer())).resize(1, 1).raw().toBuffer()
-      console.log(JSON.stringify({ profile, runId, assetId, stage, bytes: photo.length, result: 'passed' }))
-      return
+      return photo.length
     }
     await delay(2500)
   }
   throw new Error('Processing timed out')
 }
 
+let bytes
 try {
-  await run()
+  bytes = await run()
 } catch (error) {
-  console.error(JSON.stringify({ profile, runId, assetId, stage, error: error.message }))
+  console.error(JSON.stringify({ profile, runId, assetId, stage, requestIds, error: error.message }))
   process.exitCode = 1
 } finally {
   if (assetId) {
+    stage = 'cleanup'
     try { await api('assets/' + assetId, 'DELETE') }
     catch (error) {
-      console.error(JSON.stringify({ profile, runId, assetId, stage: 'cleanup', error: error.message }))
+      console.error(JSON.stringify({ profile, runId, assetId, stage, requestIds, error: error.message }))
       process.exitCode = 1
     }
   }
+}
+if (bytes && !process.exitCode) {
+  console.log(JSON.stringify({ profile, runId, assetId, stage, requestIds, bytes, result: 'passed' }))
 }
