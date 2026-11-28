@@ -5,6 +5,7 @@ import {useEffect,useState} from 'react'
 import {useAccount,canManage} from '@/components/app/account'
 import {request} from '@/components/app/library'
 import Builder from './Builder'
+import ApiReference from './ApiReference'
 import Icon from '@/components/app/Icon'
 import css from './workflows.module.css'
 
@@ -71,7 +72,7 @@ function WorkspaceWorkflows({manage}:{manage:boolean}) {
         <span className={css.icon}><Icon name={node.icon} size={21}/></span><strong>{node.name}</strong><small>{node.detail}</small></li>)}</ol>
       <footer className={css.controls}><div>
         <label><input type="checkbox" checked={config?.captions ?? false} disabled={!manage || busy || !config || (!config.captionsAvailable && !config.captions)}
-          onChange={e=>config && void change('/omoshow-upload-review','PUT',{enabled:config.enabled,captions:e.target.checked})}/> Generate captions</label>
+          onChange={e=>config && void change('/omoshow-upload-review','PUT',{enabled:config.enabled,captions:e.target.checked})}/> Enable captions</label>
         <p>{!config?'Loading workspace settings…':config.captionsAvailable?'OpenAI transcription is configured.':'Set OPENAI_API_KEY on the backend and deploy to use captions.'}</p>
       </div>{manage && <button className={css.action} disabled={!config || busy} onClick={()=>config && void change('/omoshow-upload-review','PUT',{enabled:!config.enabled,captions:config.captions})}>{config?.enabled?'Disable workflow':'Enable workflow'}</button>}</footer>
     </section>}
@@ -79,20 +80,11 @@ function WorkspaceWorkflows({manage}:{manage:boolean}) {
       <div className={css.filters}><input aria-label="Search runs by asset name" placeholder="Search by asset name" value={query} onChange={e=>setQuery(e.target.value)}/>
       <select aria-label="Filter run status" value={filter} onChange={e=>setFilter(e.target.value)}>{['All','In progress','Complete','Failed'].map(v=><option key={v}>{v}</option>)}</select></div>
       {!filtered.length && <div className={css.empty}><Icon name="clock" size={26}/><strong>{!config?'Loading runs…':runs.length?'No matching runs':'No runs yet'}</strong><p>{runs.length?'Try another name or status.':config?.enabled?'The next video upload will appear here.':'Enable the workflow to track new uploads here.'}</p></div>}
-      {filtered.map(run=><details key={run.id} className={css.run}><summary>{run.title} <span>{run.error?'Failed':run.phase==='complete'?'Sent to review':run.phase}</span></summary>
+      {filtered.map(run=><details key={run.id} className={css.run}><summary>{run.title} <span>{run.error?'Failed':run.phase==='complete'?'Sent to review':run.phase}</span> <small>View run</small></summary>
         <ol>{steps(run).map(([name,state])=><li key={name}>{name} · {state}</li>)}</ol>
-        {run.error && <p>{run.error} {manage && <button disabled={busy} onClick={()=>void change('/runs/'+run.id+'/retry','POST')}>Retry step</button>}</p>}
+        {run.error && <p>{run.error} {manage && <button disabled={busy} onClick={()=>void change('/runs/'+run.id+'/retry','POST')}>Retry failed step</button>}</p>}
         <Link className={css.link} href={'/dashboard/library/'+run.id}>Open asset →</Link></details>)}</section>}
-    {view==='API reference' && <section className={css.api}><h2>Workflow API</h2>
-      <p>Use a workspace API key as a Bearer token. A read key can inspect settings and runs. A full-access key can change the template or retry a failed step.</p>
-      <ul>
-        <li><code>GET /api/v1/workflows/builder</code> · List manual flows. POST here to create a draft.</li><li><code>PUT /api/v1/workflows/builder/:flowId</code> · Save the next version.</li><li><code>POST /api/v1/workflows/builder/:flowId/test</code> · Preview a saved version on an asset. Use /run to execute with a requestId.</li><li><code>GET /api/v1/workflows/builder/activity</code> · Inspect execution logs.</li><li><code>GET /api/v1/workflows</code> — template settings and caption availability</li>
-        <li><code>PUT /api/v1/workflows/omoshow-upload-review</code> — send boolean <code>enabled</code> and <code>captions</code> fields</li>
-        <li><code>GET /api/v1/workflows/runs</code> — latest 100 runs</li>
-        <li><code>GET /api/v1/workflows/runs/{'{assetId}'}</code> — inspect one run</li>
-        <li><code>POST /api/v1/workflows/runs/{'{assetId}'}/retry</code> — retry its failed step</li>
-      </ul>
-    </section>}
+    {view==='API reference' && <ApiReference/>}
   </main>
 }
 export default function Workflows(){

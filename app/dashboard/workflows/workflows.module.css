@@ -56,3 +56,21 @@
 .gallery .tile strong {font-size:18px;letter-spacing:-.025em}
 .editor p {display:flex;align-items:center;gap:8px}
 @media(max-width:640px){.builder .filters{gap:5px}.builder .filters button{padding:7px 9px;font-size:13px}}
+
+.reference{display:grid;gap:22px;min-width:0}
+.reference h2,.reference h3,.reference h4,.stepCard h3{margin:0}
+.reference>p{max-width:78ch;margin:0;color:#c8c5c1;line-height:1.6}
+.reference>section{border:1px solid #333;border-radius:12px;background:#111;overflow:hidden}
+.reference h3{padding:20px;font-size:19px}
+.endpoint{border-top:1px solid #303030}
+.endpoint summary{cursor:pointer;display:grid;grid-template-columns:4em 1fr auto;align-items:center;gap:10px;padding:14px 20px}
+.endpoint summary:hover,.endpoint[open] summary{background:#202020}
+.endpoint summary code{color:#ffc497}.endpoint summary span{font-size:12px;color:#cecac6}
+.endpoint>div{padding:16px 20px}.endpoint header{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.endpoint button{background:#282828;border:1px solid #555;color:#fff;border-radius:6px;padding:6px 10px;cursor:pointer}
+.endpoint pre{font-size:13px;overflow:auto;background:#090909;border-radius:8px;padding:14px;line-height:1.5}
+.endpoint .path{overflow-wrap:anywhere;color:#ffc497}
+.stepCard{min-width:0;border:1px solid #393939;border-radius:10px;background:#141414;padding:15px}
+.stepCard h3{font-size:16px}.stepCard .block{padding:12px 0 0;background:transparent}
+.stepOutcome{margin-top:14px;padding-top:10px;border-top:1px solid #404040;font-size:14px;overflow-wrap:anywhere}.stepOutcome strong{margin-right:8px;text-transform:capitalize}
+@media(max-width:600px){.endpoint summary{grid-template-columns:3.4em 1fr;padding:12px}.endpoint summary span{grid-column:2}.endpoint>div{padding:12px}}

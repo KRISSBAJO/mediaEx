@@ -30,6 +30,7 @@ export default function Builder({manage}:{manage:boolean}){
   const [dirty,setDirty]=useState(false)
   const [assetId,setAsset]=useState('')
   const [result,setResult]=useState<Result|null>(null)
+  const [lastTests,setLastTests]=useState<Record<string,{assetId:string;result:Result}>>({})
   const [busy,setBusy]=useState(false)
   const [error,setError]=useState('')
   const [notice,setNotice]=useState('')
@@ -54,7 +55,14 @@ export default function Builder({manage}:{manage:boolean}){
     return ()=>{active=false}
   },[])
   function edit(next:Flow){setDraft(next);setDirty(true);setResult(null);setNotice('')}
-  function open(flow:Flow){setDraft(flow);setDirty(!flow.id);setResult(null);setNotice('');setError('');setAsset('')}
+  function open(flow:Flow){
+    const last=flow.id ? lastTests[flow.id+'/'+flow.version] : undefined
+    setDraft(flow);setDirty(!flow.id);setResult(last?.result??null);setAsset(last?.assetId??'')
+    setNotice(last?'Showing the last test for this version.':'');setError('')
+  }
+  function updateValue(index:number,value:string){
+    if(draft)edit({...draft,blocks:draft.blocks.map((step,i)=>i===index?{...step,value}:step)})
+  }
   async function save(){
     if(!draft)return
     setBusy(true);setError('')
@@ -68,11 +76,18 @@ export default function Builder({manage}:{manage:boolean}){
     setBusy(true);setError('');setResult(null);setNotice('')
     try{
       const output=await request<Result>(base+'/'+draft.id+(test?'/test':'/run'),{method:'POST',json:{assetId,version:draft.version,requestId:crypto.randomUUID()}})
+      if(test)setLastTests(previous=>({...previous,[draft.id+'/'+draft.version]:{assetId,result:output}}))
       setResult(output);setNotice(test?'Test finished. Asset unchanged.':'Run complete.')
       if(!test)setActivity((await request<{runs:Execution[]}>(base+'/activity')).runs)
     }catch(e){setError(e instanceof Error?e.message:'Execution failed.')}finally{setBusy(false)}
   }
-  const log=(r:Result)=><ol className={css.trace}>{r.steps.map((s,i)=><li key={i}><strong>{labels[s.kind]}</strong><span>{s.status} · {s.status==='complete' && ['asset-link','image-preview'].includes(s.kind)?<a className={css.link} href={s.detail} target="_blank" rel="noreferrer">Open {s.kind==='image-preview'?'resized image':'library asset'} ↗</a>:s.detail}</span></li>)}</ol>
+  function outcome(step:Result['steps'][number]){
+    if(step.status==='complete' && ['asset-link','image-preview'].includes(step.kind)){
+      return <a className={css.link} href={step.detail} target="_blank" rel="noreferrer">{step.kind==='image-preview'?'Preview result':'Open library asset'} ↗</a>
+    }
+    return step.detail
+  }
+  const log=(r:Result)=><ol className={css.trace}>{r.steps.map((step,i)=><li key={i}><strong>{labels[step.kind]}</strong><span>{step.status} · {outcome(step)}</span></li>)}</ol>
   return <section className={css.builder}>
     {error && <p role="alert" className={css.error}>{error}</p>}
     {draft ? <><header className={css.heading}><button disabled={busy} onClick={()=>{setDraft(null);setNotice('')}}>{dirty?'Discard edits and close':'Back to flows'}</button><span>Version {draft.version}</span></header>
@@ -80,18 +95,25 @@ export default function Builder({manage}:{manage:boolean}){
         <label>Flow name<input value={draft.name} maxLength={100} onChange={e=>edit({...draft,name:e.target.value})}/></label>
         <label>Trigger<select value={draft.trigger??'manual'} onChange={e=>edit({...draft,trigger:e.target.value})}><option value="manual">Manual run on a library asset</option><option value="upload">When a new upload finishes processing</option><option value="daily">Every 24 hours on one asset</option></select></label>
         {draft.trigger==='daily' && <label>Scheduled asset<select value={draft.scheduleAsset??''} onChange={e=>edit({...draft,scheduleAsset:e.target.value})}><option value="">Choose a ready asset</option>{assets.map(a=><option key={a.id} value={a.id}>{a.title}</option>)}</select></label>}
-        {draft.blocks.map((b,i)=><div className={css.block} key={i}><label>Action {i+1}<select value={b.kind} onChange={e=>edit({...draft,blocks:draft.blocks.map((v,j)=>i===j?block(e.target.value as Kind,e.target.value==='match-type'?'video':e.target.value==='image-preview'?'1280/webp':''):v)})}>{Object.entries(labels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
-          {!['inspect','read-tags','asset-link','otherwise','end-if'].includes(b.kind) && <label>{b.kind==='image-preview'?'Width / format (e.g. 1280/webp)':b.kind==='match-type'?'Media type':b.kind.includes('tag')?'Tag':'Message'}<input value={b.value} maxLength={b.kind.includes('tag')?40:200} placeholder={b.kind==='match-type'?'video, image, or audio':undefined} onChange={e=>edit({...draft,blocks:draft.blocks.map((v,j)=>i===j?{...v,value:e.target.value}:v)})}/></label>}
+        {draft.blocks.map((b,i)=><section className={css.stepCard} key={i}><h3>{i+1}. {b.kind==='image-preview'?'Resize image':labels[b.kind]}</h3><div className={css.block}><label>Action {i+1}<select value={b.kind} onChange={e=>edit({...draft,blocks:draft.blocks.map((v,j)=>i===j?block(e.target.value as Kind,e.target.value==='match-type'?'video':e.target.value==='image-preview'?'1280/webp':''):v)})}>{Object.entries(labels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
+          {b.kind==='image-preview' && <>
+            <label>Width<select value={b.value.split('/')[0]} onChange={e=>updateValue(i,e.target.value+'/'+b.value.split('/')[1])}>{['320','640','1280','1920'].map(w=><option key={w} value={w}>{w} px</option>)}</select></label>
+            <label>Format<select value={b.value.split('/')[1]} onChange={e=>updateValue(i,b.value.split('/')[0]+'/'+e.target.value)}>{['webp','jpeg','png','avif'].map(f=><option key={f} value={f}>{f.toUpperCase()}</option>)}</select></label>
+          </>}
+          {b.kind==='match-type' && <label>Media type<select value={b.value} onChange={e=>updateValue(i,e.target.value)}>{['image','video','audio'].map(type=><option key={type}>{type}</option>)}</select></label>}
+          {!['match-type','image-preview','inspect','read-tags','asset-link','otherwise','end-if'].includes(b.kind) && <label>{b.kind==='image-preview'?'Width / format (e.g. 1280/webp)':b.kind==='match-type'?'Media type':b.kind.includes('tag')?'Tag':'Message'}<input value={b.value} maxLength={b.kind.includes('tag')?40:200} placeholder={b.kind==='match-type'?'video, image, or audio':undefined} onChange={e=>edit({...draft,blocks:draft.blocks.map((v,j)=>i===j?{...v,value:e.target.value}:v)})}/></label>}
           <button type="button" disabled={i===0} aria-label={'Move action '+(i+1)+' up'} onClick={()=>{const copy=[...draft.blocks];[copy[i-1],copy[i]]=[copy[i],copy[i-1]];edit({...draft,blocks:copy})}}>↑</button>
-          <button type="button" aria-label={'Remove action '+(i+1)} onClick={()=>edit({...draft,blocks:draft.blocks.filter((_,j)=>j!==i)})}>Remove</button></div>)}
+          <button type="button" aria-label={'Remove action '+(i+1)} onClick={()=>edit({...draft,blocks:draft.blocks.filter((_,j)=>j!==i)})}>Remove</button></div>
+          {result?.steps[i] && <div className={css.stepOutcome}><strong>{result.steps[i].status}</strong> {outcome(result.steps[i])}</div>}
+        </section>)}
         <button disabled={draft.blocks.length>=20} onClick={()=>edit({...draft,blocks:[...draft.blocks,block('inspect')]})}>Add action</button>
         <label><input type="checkbox" checked={draft.enabled} onChange={e=>edit({...draft,enabled:e.target.checked})}/> Enable workflow</label>
         <button className={css.action} disabled={!dirty||!draft.name.trim()||!draft.blocks.length} onClick={save}>Save flow</button>
       </fieldset>
       {manage && <div className={css.test}><h3>Test on a library asset</h3><p>Preview the steps before applying them. Save your edits to test this version.</p>
-        <select aria-label="Library asset" value={assetId} onChange={e=>{setAsset(e.target.value);setResult(null);setNotice('')}}><option value="">Choose a ready asset</option>{assets.map(a=><option key={a.id} value={a.id}>{a.title}</option>)}</select>
+        <select aria-label="Library asset" value={assetId} disabled={busy} onChange={e=>{setAsset(e.target.value);setResult(null);setNotice('')}}><option value="">Choose a ready asset</option>{assets.map(a=><option key={a.id} value={a.id}>{a.title}</option>)}</select>
         <button disabled={!assetId||dirty||busy} onClick={()=>void execute(true)}>Test flow</button><button disabled={!assetId||dirty||busy||!draft.enabled} onClick={()=>void execute(false)}>Run on asset</button></div>}
-      {notice && <p role="status">{notice}</p>}{result && log(result)}</> :
+      {notice && <p role="status">{notice}</p>}</> :
       <><div className={css.filters}>{['My flows','Templates','Workflow agent','Activity','Notifications','Connections','Parameters','Usage'].map(m=><button key={m} aria-pressed={mode===m} onClick={()=>{setMode(m);setSearch('')}}>{m}</button>)}</div>
         {mode==='My flows' && <><div className={css.heading}><h2>My flows</h2>{manage && <button className={css.action} onClick={()=>open({name:'Untitled flow',blocks:[block('inspect')],enabled:false,version:0})}>Create flow</button>}</div>
         {!!flows.length && <input aria-label="Search flows" placeholder="Search flows" value={search} onChange={e=>setSearch(e.target.value)}/>}
