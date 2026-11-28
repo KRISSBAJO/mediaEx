@@ -277,6 +277,32 @@ create table if not exists "asset_variant" (
   "createdAt" timestamptz not null default now(),
   primary key ("assetId", "key")
 );
+create table if not exists media_flow (
+ id text primary key, org text not null references organization(id) on delete cascade,
+ name text not null, enabled boolean not null default false, version integer not null default 1,
+ blocks jsonb not null, updated timestamptz not null default now()
+);
+create table if not exists media_flow_parameter (
+ org text not null references organization(id) on delete cascade, name text not null, value text not null,
+ primary key(org,name)
+);
+create table if not exists flow_agent_usage (
+ org text primary key references organization(id) on delete cascade, bucket timestamptz not null, requests integer not null
+);
+alter table media_flow add column if not exists trigger_kind text not null default 'manual';
+create table if not exists media_flow_pending (
+ flow text not null references media_flow(id) on delete cascade, asset text not null references asset(id) on delete cascade,
+ version integer not null, name text not null, blocks jsonb not null, primary key(flow,asset)
+);
+create index if not exists media_flow_workspace on media_flow(org,updated desc);
+create table if not exists media_flow_execution (
+ org text not null references organization(id) on delete cascade, id text not null,
+ flow text not null references media_flow(id) on delete cascade, version integer not null,
+ name text not null, asset text not null references asset(id) on delete cascade,
+ title text not null, result jsonb not null, created timestamptz not null default now(),
+ primary key(org,id)
+);
+create index if not exists media_flow_execution_workspace on media_flow_execution(org,created desc);
 create table if not exists review_workflow (
  org text primary key references organization(id) on delete cascade, enabled boolean not null, captions boolean not null
 );

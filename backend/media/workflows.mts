@@ -1,3 +1,4 @@
+import { flowBuilder } from './flow-builder.mts'
 import { pool } from '../auth.mts'
 import { HttpError } from './assets.mts'
 import { captionsAvailable } from './captions.mts'
@@ -17,6 +18,7 @@ export async function workflows(req: Request, actor: Actor, path: string[]) {
   const get = req.method === 'GET'
   if (actor.via === 'key') requireScope(actor, get ? 'read' : 'full')
   else if (!get && !['owner','admin'].includes(actor.role)) throw new HttpError(403,'An owner or admin must manage workflows.')
+  if (path[0]==='builder') return flowBuilder(req,actor,path.slice(1))
   if (get && !path.length) {
     const settings = await pool.query('select enabled,captions from review_workflow where org=$1',[orgId])
     return read({template, ...(settings.rows[0] ?? {enabled:false,captions:false}), captionsAvailable:captionsAvailable()})

@@ -54,6 +54,47 @@ try {
   await pool.query(`update caption set status='ready' where "assetId"=$1`,[second])
   await advanceWorkflows()
   assert.equal((await run(second)).phase,'complete')
+  const spec={name:'QA tagger',enabled:false,blocks:[{kind:'match-type',value:'video'},{kind:'add-tag',value:'fixture'},{kind:'notify',value:'Tagged'}]}
+  assert.equal((await call('workflows/builder/parameters/queue','PUT',{value:'fixture',previous:null})).status,200)
+  spec.blocks[1].value='{{queue}}'
+  const saved=await (await call('workflows/builder','POST',spec)).json()
+  assert.ok(saved.flow?.id,JSON.stringify(saved))
+  const builder='workflows/builder/'+saved.flow.id
+  const input={version:1,assetId:first,requestId:randomUUID()}
+  const preview=await (await call(builder+'/test','POST',input)).json()
+  assert.equal(preview.preview,true)
+  assert.deepEqual(preview.notifications,['Tagged'])
+  assert.equal((await pool.query('select tags from asset where id=$1',[first])).rows[0].tags.includes('fixture'),false)
+  assert.equal((await call(builder+'/run','POST',input)).status,409)
+  assert.equal((await call(builder,'PUT',{...spec,version:1,enabled:true})).status,200)
+  assert.equal((await call(builder,'PUT',{...spec,version:1})).status,409)
+  input.version=2
+  for(let i=0;i<2;i++)assert.equal((await call(builder+'/run','POST',input)).status,200)
+  assert.equal((await (await call('workflows/builder/activity')).json()).runs.length,1)
+  assert.ok((await pool.query('select tags from asset where id=$1',[first])).rows[0].tags.includes('fixture'))
+  assert.equal((await call(builder+'/test','POST',{...input,assetId:'outside'})).status,404)
+  const {advanceBuilderUploads}=await import('../backend/media/flow-builder.mts')
+  assert.equal((await call(builder,'PUT',{...spec,version:2,trigger:'upload',enabled:true})).status,200)
+  const auto=await upload()
+  assert.equal((await call(builder,'PUT',{...spec,version:3,trigger:'manual',enabled:false})).status,200)
+  await Promise.all([advanceBuilderUploads(),advanceBuilderUploads()])
+  const history=(await (await call('workflows/builder/activity')).json()).runs
+  assert.equal(history.filter(row=>row.asset===auto && row.version===3).length,1)
+  assert.equal((await (await call('workflows/builder/usage')).json()).usage.executions,2)
+  const oldFetch=globalThis.fetch
+  try {
+    process.env.DEEPSEEK_API_KEY='fixture'
+    globalThis.fetch=async(url,opts)=>{
+      assert.equal(url,'https://api.deepseek.com/chat/completions')
+      assert.equal(JSON.parse(opts.body).messages[1].content,'Tag videos')
+      return Response.json({choices:[{message:{content:JSON.stringify(spec)}}]})
+    }
+    const agent=await (await call('workflows/builder/agent','POST',{provider:'deepseek',prompt:'Tag videos'})).json()
+    assert.equal(agent.draft.enabled,false)
+    assert.equal(agent.draft.blocks.length,3)
+  } finally {globalThis.fetch=oldFetch;delete process.env.DEEPSEEK_API_KEY}
+  console.log('Passed upload-trigger snapshots and provider draft fixture.')
+  console.log('Passed manual builder preview, activation, version conflicts, asset writes, replay and activity checks.')
   await pool.query("update api_key set scope='read'")
   assert.equal((await configure(false)).status,403)
   assert.equal((await call('workflows/runs')).status,200)

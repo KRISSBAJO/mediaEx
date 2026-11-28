@@ -4,6 +4,7 @@ import Link from 'next/link'
 import {useEffect,useState} from 'react'
 import {useAccount,canManage} from '@/components/app/account'
 import {request} from '@/components/app/library'
+import Builder from './Builder'
 import Icon from '@/components/app/Icon'
 import css from './workflows.module.css'
 
@@ -27,7 +28,7 @@ function WorkspaceWorkflows({manage}:{manage:boolean}) {
   const [message,setMessage]=useState('')
   const [busy,setBusy]=useState(false)
   const [revision,refresh]=useState(0)
-  const [view,setView]=useState('Workflow')
+  const [view,setView]=useState('Flow builder')
   const [filter,setFilter]=useState('All')
   const [query,setQuery]=useState('')
   const filtered=runs.filter(run=>run.title.toLowerCase().includes(query.trim().toLowerCase()) &&
@@ -59,10 +60,11 @@ function WorkspaceWorkflows({manage}:{manage:boolean}) {
   return <main className={css.workbench}>
     <header className={css.heading}><h1>Workflows</h1><Link className={css.link} href="/dashboard/review">Review queue <Icon name="arrowRight" size={15}/></Link></header>
     <nav aria-label="Workflow views" className={css.nav}>
-      {['Workflow','Run history','API reference'].map(name=><button type="button" key={name} aria-current={view===name?'page':undefined} onClick={()=>setView(name)}>{name}</button>)}
+      {['Flow builder','Upload automation','Upload history','API reference'].map(name=><button type="button" key={name} aria-current={view===name?'page':undefined} onClick={()=>setView(name)}>{name}</button>)}
     </nav>
     {message && <p role="alert" className={css.error}>{message}</p>}
-    {view==='Workflow' && <section className={css.panel}>
+    {view==='Flow builder' && <Builder manage={manage}/>} 
+    {view==='Upload automation' && <section className={css.panel}>
       <header className={css.panelHead}><div><span className={css.kicker}>Video workflow</span><h2>Omoshow upload review</h2><p>Route new workspace videos through processing and into review.</p></div>
         <span className={css.status} data-active={config?.enabled}>{config?(config.enabled?'Active':'Inactive'):'Loading'}</span></header>
       <ol className={css.canvas} aria-label="Workflow steps">{nodes.map(node=><li key={node.name}>
@@ -73,7 +75,7 @@ function WorkspaceWorkflows({manage}:{manage:boolean}) {
         <p>{!config?'Loading workspace settings…':config.captionsAvailable?'OpenAI transcription is configured.':'Set OPENAI_API_KEY on the backend and deploy to use captions.'}</p>
       </div>{manage && <button className={css.action} disabled={!config || busy} onClick={()=>config && void change('/omoshow-upload-review','PUT',{enabled:!config.enabled,captions:config.captions})}>{config?.enabled?'Disable workflow':'Enable workflow'}</button>}</footer>
     </section>}
-    {view==='Run history' && <section className={css.panel}><header className={css.panelHead}><div><h2>Run history</h2><p>Inspect the latest 100 uploads enrolled in this workflow.</p></div></header>
+    {view==='Upload history' && <section className={css.panel}><header className={css.panelHead}><div><h2>Run history</h2><p>Inspect the latest 100 uploads enrolled in this workflow.</p></div></header>
       <div className={css.filters}><input aria-label="Search runs by asset name" placeholder="Search by asset name" value={query} onChange={e=>setQuery(e.target.value)}/>
       <select aria-label="Filter run status" value={filter} onChange={e=>setFilter(e.target.value)}>{['All','In progress','Complete','Failed'].map(v=><option key={v}>{v}</option>)}</select></div>
       {!filtered.length && <div className={css.empty}><Icon name="clock" size={26}/><strong>{!config?'Loading runs…':runs.length?'No matching runs':'No runs yet'}</strong><p>{runs.length?'Try another name or status.':config?.enabled?'The next video upload will appear here.':'Enable the workflow to track new uploads here.'}</p></div>}
@@ -84,7 +86,7 @@ function WorkspaceWorkflows({manage}:{manage:boolean}) {
     {view==='API reference' && <section className={css.api}><h2>Workflow API</h2>
       <p>Use a workspace API key as a Bearer token. A read key can inspect settings and runs. A full-access key can change the template or retry a failed step.</p>
       <ul>
-        <li><code>GET /api/v1/workflows</code> — template settings and caption availability</li>
+        <li><code>GET /api/v1/workflows/builder</code> · List manual flows. POST here to create a draft.</li><li><code>PUT /api/v1/workflows/builder/:flowId</code> · Save the next version.</li><li><code>POST /api/v1/workflows/builder/:flowId/test</code> · Preview a saved version on an asset. Use /run to execute with a requestId.</li><li><code>GET /api/v1/workflows/builder/activity</code> · Inspect execution logs.</li><li><code>GET /api/v1/workflows</code> — template settings and caption availability</li>
         <li><code>PUT /api/v1/workflows/omoshow-upload-review</code> — send boolean <code>enabled</code> and <code>captions</code> fields</li>
         <li><code>GET /api/v1/workflows/runs</code> — latest 100 runs</li>
         <li><code>GET /api/v1/workflows/runs/{'{assetId}'}</code> — inspect one run</li>

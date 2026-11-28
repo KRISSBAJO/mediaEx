@@ -18,6 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { pool } from '../auth.mts'
 import { prefixOf, type AssetRow } from './assets.mts'
+import { advanceBuilderUploads } from './flow-builder.mts'
 import { advanceWorkflows } from './workflows.mts'
 import { reviewAsset } from './moderation.mts'
 import { checkProbedPolicy } from './presets.mts'
@@ -443,6 +444,7 @@ export function startWorker() {
       state.busy = true
       try {
         await advanceWorkflows()
+        await advanceBuilderUploads()
         await runMetadataJobs()
         await recoverStale()
         for (let job = await claim(); job; job = await claim()) await processAsset(job)

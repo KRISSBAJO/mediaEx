@@ -230,6 +230,8 @@ export async function startUpload(a: Actor, req: Request) {
       [id, orgId, a.userId, a.via === 'key' ? `API key: ${a.keyName}` : null, title, type, fileName, mimeType, size,
        originalKey, folderId, policy ? 'pending' : moderation, policy?.playback ?? 'public', policy, store.kind],
     )
+    await client.query(`insert into media_flow_pending(flow,asset,version,name,blocks)
+      select id,$2,version,name,blocks from media_flow where org=$1 and enabled and trigger_kind='upload'`,[orgId,id])
     if (workflow) await client.query('insert into review_workflow_run(asset,captions) values($1,$2)', [id,workflow.captions])
     return result.rows[0]
   })

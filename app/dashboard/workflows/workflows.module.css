@@ -34,3 +34,25 @@
 .api code {color:#f0bd9d;overflow-wrap:anywhere}
 .error {border-left:3px solid #ea7650;padding:10px}
 @media(max-width:780px){.canvas{flex-direction:column;gap:18px}.canvas li+li:before{width:0;height:18px;left:34px;top:-19px;border-left:1px solid #a48166}.controls{align-items:flex-start;flex-direction:column}.nav{gap:16px}.heading{flex-wrap:wrap}}
+.nav,.builder .filters{flex-wrap:wrap}
+.builder{border:1px solid #32302e;border-radius:16px;background:#101010;padding:clamp(20px,3vw,38px);display:grid;gap:20px}
+.builder .filters{padding:0;justify-content:flex-start;gap:8px}
+.builder button,.builder select,.builder input:not([type=checkbox]){border:1px solid #45413e;border-radius:8px;padding:9px 13px;color:#eee;background:#1c1b1a}
+.builder button{cursor:pointer}.builder button:disabled{opacity:.55;cursor:default}
+.builder button[aria-pressed=true]{border-color:#db895e;color:#ffc8a9}
+.builder .action{color:#17110e;background:#ff8248;border-color:#ff8248}
+.editor,.test{display:grid;align-items:start;gap:14px;border:1px solid #39332d;border-radius:12px;padding:20px}
+.editor legend{font-weight:650;padding:0 8px}.editor label{display:grid;gap:6px}.editor label:has(input[type=checkbox]){display:flex;gap:8px}
+.block{display:flex;flex-wrap:wrap;align-items:end;gap:10px;padding:14px;border-radius:9px;background:#171615}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:14px}
+.builder .tile{display:grid;align-content:start;gap:10px;text-align:left;padding:20px}.tile svg{color:#ffa574}.tile span,.trace span{font-size:13px;color:#c3bdb8}
+.trace{display:grid;gap:8px;padding-left:20px}.trace span{margin-left:10px}
+.test select,.block input,.block select{max-width:100%}
+.builder textarea{display:block;width:100%;padding:12px;margin-top:8px;border:1px solid #48423d;border-radius:8px;background:#1b1918;color:#f4f1eb;resize:vertical}
+.gallery {border-top:1px solid #33302e;padding-top:24px;margin-top:8px}
+.gallery h3 {margin:0 0 16px;font-size:17px}
+.gallery .tile {background:linear-gradient(135deg,#26211e,#171717 75%);border-color:#403a36;min-height:144px}
+.gallery .tile:hover {border-color:#946b51}
+.gallery .tile strong {font-size:18px;letter-spacing:-.025em}
+.editor p {display:flex;align-items:center;gap:8px}
+@media(max-width:640px){.builder .filters{gap:5px}.builder .filters button{padding:7px 9px;font-size:13px}}
