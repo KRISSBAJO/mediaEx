@@ -202,13 +202,15 @@ export async function handleModeration(req: Request, sub?: string) {
     const state = new URL(req.url).searchParams.get('state') ?? 'pending'
     if (!['pending', 'rejected', 'approved'].includes(state)) throw new HttpError(400, 'state must be pending, rejected or approved.')
     const { rows } = await pool.query<{ id: string }>(
-      `select id from "asset" where "organizationId" = $1 and "deletedAt" is null and moderation = $2 and ($2 <> 'approved' or "moderatedAt" is not null)
+      `select id from "asset" where "organizationId" = $1 and "deletedAt" is null and moderation = $2
+        and not exists(select 1 from review_workflow_run w where w.asset="asset".id and w.phase <> 'complete') and ($2 <> 'approved' or "moderatedAt" is not null)
         order by case when jsonb_array_length("moderationFlags") > 0 then 0 else 1 end, coalesce("moderatedAt", "createdAt") desc limit 300`,
       [orgId, state],
     )
     const assets = (await Promise.all(rows.map((r) => getAssetRow(r.id, orgId)))).filter((a): a is AssetRow => Boolean(a)).map(toDTO)
     const { rows: counts } = await pool.query<{ moderation: string; n: number }>(
-      `select moderation, count(*)::int as n from "asset" where "organizationId" = $1 and "deletedAt" is null and moderation <> 'approved' group by moderation`,
+      `select moderation, count(*)::int as n from "asset" where "organizationId" = $1 and "deletedAt" is null and moderation <> 'approved'
+        and not exists(select 1 from review_workflow_run w where w.asset="asset".id and w.phase <> 'complete') group by moderation`,
       [orgId],
     )
     return Response.json({ assets, counts: Object.fromEntries(counts.map((c) => [c.moderation, c.n])) }, { headers: { 'Cache-Control': 'no-store' } })
@@ -223,13 +225,14 @@ export async function handleModeration(req: Request, sub?: string) {
     // a site admin's takedown outranks the workspace's own review
     const { rows: held } = await pool.query<{ id: string }>(`select id from "asset" where "organizationId" = $1 and id = any($2::text[]) and "takenDown" is not null`, [orgId, ids])
     if (decision === 'approved' && held.length) throw new HttpError(409, 'MediaEX took this down, so it can’t be approved here. Contact MediaEX support.')
-    const { rowCount } = await pool.query(
+    const { rows: changed } = await pool.query<{id:string}>(
       `update "asset" set moderation = $3, "moderatedBy" = $4, "moderatedAt" = now(), "moderationNote" = $5, "updatedAt" = now()
-        where "organizationId" = $1 and "deletedAt" is null and id = any($2::text[])`,
+        where "organizationId" = $1 and "deletedAt" is null and id = any($2::text[])
+        and not exists(select 1 from review_workflow_run w where w.asset="asset".id and w.phase <> 'complete') returning id`,
       [orgId, ids, decision, user.id, note],
     )
-    for (const id of ids) await emitAsset(id, decision === 'approved' ? 'asset.approved' : 'asset.rejected')
-    return Response.json({ changed: rowCount })
+    for (const {id} of changed) await emitAsset(id, decision === 'approved' ? 'asset.approved' : 'asset.rejected')
+    return Response.json({ changed: changed.length })
   }
 
   if (sub === 'recheck' && req.method === 'POST') {

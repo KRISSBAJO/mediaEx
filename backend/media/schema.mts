@@ -277,6 +277,14 @@ create table if not exists "asset_variant" (
   "createdAt" timestamptz not null default now(),
   primary key ("assetId", "key")
 );
+create table if not exists review_workflow (
+ org text primary key references organization(id) on delete cascade, enabled boolean not null, captions boolean not null
+);
+create table if not exists review_workflow_run (
+ asset text primary key references asset(id) on delete cascade, captions boolean not null,
+ phase text not null default 'prepare', error text, updated timestamptz not null default now()
+);
+create index if not exists review_workflow_pending on review_workflow_run(updated) where phase <> 'complete' and error is null;
 `
 
 /** Match the Library's stable sort tuples in both directions. Applied after recovery adds deletedAt. */

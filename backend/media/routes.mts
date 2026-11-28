@@ -32,6 +32,7 @@
  *
  * The frontend forwards these paths unchanged (see app/api/*).
  */
+import { workflows } from './workflows.mts'
 import { metadataJobs } from './metadata-jobs.mts'
 import { rights, auditExport } from './governance.mts'
 import { listReferences } from './references.mts'
@@ -141,7 +142,7 @@ export async function one(a: Actor, req: Request, id: string) {
   throw new HttpError(405, 'Method not allowed')
 }
 
-export async function retry(a: Actor, id: string) {
+export async function retry(a: Actor, id: string, failedOnly = false) {
   const { orgId } = a
   const row = await getAssetRow(id, orgId)
   if (!row) throw new HttpError(404, 'That asset doesn’t exist in this workspace.')
@@ -150,8 +151,8 @@ export async function retry(a: Actor, id: string) {
   try {
     await client.query('begin')
     const queued = await client.query(`update asset set status='queued', stage=1, progress=0, error=null, attempts=0, "updatedAt"=now()
-      where id=$1 and "revisionId"=$2 and "deletedAt" is null and "takenDown" is null and status in ('ready','failed')
-      and not exists(select 1 from workspace_admin w where w."organizationId"=asset."organizationId" and w."suspendedAt" is not null)`, [id,row.revisionId])
+      where id=$1 and "revisionId"=$2 and "deletedAt" is null and "takenDown" is null and status in ('ready','failed') and (not $3::boolean or status='failed')
+      and not exists(select 1 from workspace_admin w where w."organizationId"=asset."organizationId" and w."suspendedAt" is not null)`, [id,row.revisionId,failedOnly])
     if (!queued.rowCount) throw new HttpError(409, 'The asset changed. Refresh before retrying.')
     await client.query('delete from asset_variant where "assetId"=$1', [id])
     await storage(row).removePrefix(`${prefixOf(row)}/derived`)
@@ -214,7 +215,11 @@ export async function startUpload(a: Actor, req: Request) {
   const title = fileName.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim() || fileName
   const row = await inWorkspaceTransaction(orgId, async client => {
     const preset = await choosePreset(client, orgId, b?.presetId)
-    const policy = preset?.policy ?? null
+    const workflow = type === 'video' ? (await client.query<{ captions: boolean }>(
+      'select captions from review_workflow where org=$1 and enabled', [orgId])).rows[0] : undefined
+    const policy = workflow ? { maxBytes: null, playback: 'public' as const,
+      maxShortSide: null, maxSourceEdge: null, maxDuration: null, ...preset?.policy,
+      kinds: preset && !preset.policy.kinds.includes('video') ? [] : ['video' as const], review: true } : preset?.policy ?? null
     checkUploadPolicy(policy, type, size)
     const folderId = await folderOf(orgId, preset ? preset.folderId : b?.folderId, client)
     await assertStorage(client, orgId, size, planId)
@@ -225,6 +230,7 @@ export async function startUpload(a: Actor, req: Request) {
       [id, orgId, a.userId, a.via === 'key' ? `API key: ${a.keyName}` : null, title, type, fileName, mimeType, size,
        originalKey, folderId, policy ? 'pending' : moderation, policy?.playback ?? 'public', policy, store.kind],
     )
+    if (workflow) await client.query('insert into review_workflow_run(asset,captions) values($1,$2)', [id,workflow.captions])
     return result.rows[0]
   })
   let uploadId: string | undefined
@@ -478,11 +484,13 @@ export async function handleMedia(req: Request, pathname: string): Promise<Respo
       const libraryRead = ['assets','collections','folders','fields','tags','searches'].includes(parts[1]) && ['GET','HEAD'].includes(m)
         && !['backup','retention','jobs','audit','rights'].includes(parts[2] ?? '') && !['backup','rights'].includes(parts[3] ?? '')
       const decision = a.role==='reviewer' && m==='POST' && parts[1]==='assets' && parts[3]==='review' && parts.length===4
-      if (!libraryRead && !decision) throw new HttpError(403,'Your workspace role does not permit this operation.')
+      const workflowRead = m === 'GET' && parts[1] === 'uploads' && parts[2] === 'workflows'
+      if (!libraryRead && !decision && !workflowRead) throw new HttpError(403,'Your workspace role does not permit this operation.')
       return new Response(null,{status:204})
     })
     if (restriction.status!==204) return restriction
   }
+  if (parts[1] === 'uploads' && parts[2] === 'workflows') return handle(async () => workflows(req, await sessionActor(req.headers), parts.slice(3)))
   if (parts[1] === 'v1') return handleV1(req, parts)
   if (parts[1] === 'uploads' && parts[2] === 'presets' && parts.length <= 4) return handle(() => handlePresets(req, parts[3]))
   if (parts[1] === 'playback') return handle(() => handlePlayback(req, parts))

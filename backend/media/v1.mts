@@ -38,6 +38,7 @@ import { auditExport } from './governance.mts'
 import { reference, listReferences } from './references.mts'
 import { reviewAsset } from './reviews.mts'
 import { recovery } from './recovery.mts'
+import { workflows } from './workflows.mts'
 import { keyActor, requireScope } from './keys.mts'
 import { captions, completeUpload, one, playbackToken, receivePart, receiveUpload, retry, startUpload, uploadParts } from './routes.mts'
 import { KEY_SCOPE_LABEL, parseQuery } from './types.mts'
@@ -58,6 +59,7 @@ export function handleV1(req: Request, parts: string[]) {
     const [, , area, raw, sub, extra] = parts // api, v1, area, id?, sub?, part number or caption language?
     const m = req.method
     if (a.scope==='publish' && !['whoami','references'].includes(area)) throw new HttpError(403,'This service key is scoped to application references.')
+    if (area === 'workflows') return workflows(req, a, parts.slice(3))
     if (area === 'audit' && parts.length === 3) return auditExport(req,a)
     if (area === 'buckets') {
       requireScope(a, m === 'GET' || m === 'HEAD' ? 'read' : 'full')

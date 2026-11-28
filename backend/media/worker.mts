@@ -18,6 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { pool } from '../auth.mts'
 import { prefixOf, type AssetRow } from './assets.mts'
+import { advanceWorkflows } from './workflows.mts'
 import { reviewAsset } from './moderation.mts'
 import { checkProbedPolicy } from './presets.mts'
 import { emitAsset } from './webhooks.mts'
@@ -409,10 +410,11 @@ async function processAsset(job: AssetRow) {
       thumbKey, posterKey, playlistKey, playlists: JSON.stringify(playlists), renditions: JSON.stringify(renditions), outputSize,
     })
     // moderation: blocklist and optional automatic review decide whether it goes public
-    await reviewAsset(job.id).catch((e) => console.error(`[media] ${job.id} moderation check failed:`, e instanceof Error ? e.message : e))
+    const enrolled = (await pool.query('select 1 from review_workflow_run where asset=$1', [job.id])).rowCount
+    if (!enrolled) await reviewAsset(job.id).catch((e) => console.error(`[media] ${job.id} moderation check failed:`, e instanceof Error ? e.message : e))
     await emitAsset(job.id, 'asset.ready')
     // automatic captions run afterwards, so the asset is playable straight away
-    await captionsAfterReady(job).catch((e) => console.error(`[media] ${job.id} couldn’t queue captions:`, e instanceof Error ? e.message : e))
+    if (!enrolled) await captionsAfterReady(job).catch((e) => console.error(`[media] ${job.id} couldn’t queue captions:`, e instanceof Error ? e.message : e))
     console.log(`[media] ${job.id} ready in ${((Date.now() - t0) / 1000).toFixed(1)}s (${info.type}, ${renditions.length} outputs)`)
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
@@ -440,6 +442,7 @@ export function startWorker() {
       if (state.busy) return
       state.busy = true
       try {
+        await advanceWorkflows()
         await runMetadataJobs()
         await recoverStale()
         for (let job = await claim(); job; job = await claim()) await processAsset(job)

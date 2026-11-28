@@ -22,6 +22,7 @@ const NAV = [
       { href: '/dashboard', label: 'Overview', icon: 'overview' },
       { href: '/dashboard/library', label: 'Library', icon: 'library' },
       { href: '/dashboard/uploads', label: 'Uploads', icon: 'upload' },
+      { href: '/dashboard/workflows', label: 'Workflows', icon: 'layers' },
       { href: '/dashboard/review', label: 'Review', icon: 'shieldCheck' },
       { href: '/dashboard/trash', label: 'Trash', icon: 'trash' },
     ],
