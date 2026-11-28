@@ -1,3 +1,4 @@
+import { emit } from './webhooks.mts'
 import { draftFlow,flowProviders } from './flow-agent.mts'
 import { randomUUID } from 'node:crypto'
 import { pool } from '../auth.mts'
@@ -5,7 +6,7 @@ import { HttpError } from './assets.mts'
 import { inWorkspaceTransaction } from './presets.mts'
 import type { Actor } from './keys.mts'
 
-const kinds = ['inspect','match-type','match-tag','add-tag','log','notify'] as const
+const kinds = ['inspect','match-type','match-tag','add-tag','read-tags','asset-link','image-preview','otherwise','end-if','log','notify','webhook'] as const
 type Kind = typeof kinds[number]
 type Block = {kind:Kind;value:string}
 type Asset = {id:string;title:string;type:string;tags:string[];size:string}
@@ -19,25 +20,50 @@ function definition(input:Record<string,unknown>) {
   const blocks:Block[]=input.blocks.map(block=>{
     if(!block || !kinds.includes(block.kind)) throw new HttpError(400,'Unknown workflow block.')
     const value=typeof block.value==='string'?block.value.trim():''
-    if(block.kind!=='inspect' && (!value || value.length>200)) throw new HttpError(400,'Each configured block needs a value of up to 200 characters.')
+    if(!['inspect','read-tags','asset-link','otherwise','end-if'].includes(block.kind) && (!value || value.length>200)) throw new HttpError(400,'Each configured block needs a value of up to 200 characters.')
     if(block.kind==='match-type' && !['video','image','audio'].includes(value)) throw new HttpError(400,'Choose video, image, or audio.')
     if(['match-tag','add-tag'].includes(block.kind) && value.length>40) throw new HttpError(400,'Tags are limited to 40 characters.')
+    if(block.kind==='image-preview' && !/^(?:320|640|1280|1920)\/(?:webp|jpeg|png|avif)$/.test(value))throw new HttpError(400,'Choose a supported image size and format.')
     return {kind:block.kind,value:['match-tag','add-tag'].includes(block.kind)?value.toLowerCase():value}
   })
+  const branches:boolean[]=[]
+  for(const b of blocks){
+    if(b.kind==='match-type'||b.kind==='match-tag')branches.push(false)
+    if(b.kind==='otherwise'){
+      if(!branches.length||branches[branches.length-1])throw new HttpError(400,'Otherwise needs a preceding condition.')
+      branches[branches.length-1]=true
+    }
+    if(b.kind==='end-if'){
+      if(!branches.length)throw new HttpError(400,'End condition needs a preceding condition.')
+      branches.pop()
+    }
+  }
   const trigger=input.trigger??'manual'
-  if(trigger!=='manual' && trigger!=='upload')throw new HttpError(400,'Unknown trigger.')
-  return {name,enabled:input.enabled,blocks,trigger}
+  if(trigger!=='manual' && trigger!=='upload' && trigger!=='daily')throw new HttpError(400,'Unknown trigger.')
+  return {name,enabled:input.enabled,blocks,trigger,scheduleAsset:trigger==='daily'?input.scheduleAsset:null}
 }
 
 export function evaluateFlow(blocks:Block[],asset:Asset) {
-  let matched=true
+  const branches:boolean[]=[]
   const tags=new Set(asset.tags)
   const notifications:string[]=[]
   const steps=blocks.map(({kind,value})=>{
+    if(kind==='otherwise')branches[branches.length-1]=!branches[branches.length-1]
+    if(kind==='end-if')branches.pop()
+    let matched=branches.every(Boolean)
+    if(!matched && (kind==='match-tag'||kind==='match-type'))branches.push(false)
     if(!matched) return {kind,status:'skipped',detail:'Condition did not match'}
     let detail=value
     if(kind==='match-type') matched=asset.type===value
     if(kind==='match-tag') matched=[...tags].some(tag=>tag.toLowerCase()===value)
+    if(kind==='match-type'||kind==='match-tag')branches.push(matched)
+    if(kind==='read-tags')detail=[...tags].join(', ') || 'No tags'
+    if(kind==='image-preview'){
+      if(asset.type!=='image')return {kind,status:'skipped',detail:'An image is required'}
+      const [width,format]=value.split('/')
+      detail='/api/media/'+asset.id+'/transform?w='+width+'&f='+format
+    }
+    if(kind==='asset-link')detail='/dashboard/library/'+asset.id
     if(kind==='inspect') detail=asset.title+' · '+asset.type+' · '+asset.size+' bytes'
     if(kind==='add-tag') tags.add(value)
     if(kind==='notify') notifications.push(value)
@@ -62,7 +88,7 @@ export async function flowBuilder(req:Request,actor:Actor,path:string[]) {
     return json({days,usage})
   }
   if(req.method==='GET' && path.length===0){
-    const {rows}=await pool.query('select id,name,enabled,version,blocks,trigger_kind as trigger from media_flow where org=$1 order by updated desc,id',[orgId])
+    const {rows}=await pool.query('select id,name,enabled,version,blocks,trigger_kind as trigger,schedule_asset as "scheduleAsset" from media_flow where org=$1 order by updated desc,id',[orgId])
     return json({flows:rows,providers:flowProviders()})
   }
   if(req.method==='GET' && path.length===1 && path[0]==='activity'){
@@ -91,14 +117,19 @@ export async function flowBuilder(req:Request,actor:Actor,path:string[]) {
     return inWorkspaceTransaction(orgId,async db=>{
       const {rows}=await db.query<{name:string;value:string}>('select name,value from media_flow_parameter where org=$1',[orgId])
       const parameters=new Map(rows.map(p=>[p.name,p.value]))
-      const {name,enabled,blocks,trigger}=definition({...spec,blocks:spec.blocks.map(b=>({...b,value:b.value.replace(/\{\{([a-z][a-z0-9_]*)\}\}/g,(_,key:string)=>{
+      const {name,enabled,blocks,trigger,scheduleAsset}=definition({...spec,blocks:spec.blocks.map(b=>({...b,value:b.value.replace(/\{\{([a-z][a-z0-9_]*)\}\}/g,(_,key:string)=>{
         const value=parameters.get(key)
         if(value===undefined)throw new HttpError(400,'Unknown parameter: '+key)
         return value
       })}))})
-      const result=path.length?await db.query(`update media_flow set name=$3,enabled=$4,blocks=$5,trigger_kind=$7,version=version+1,updated=now()
-        where org=$1 and id=$2 and version=$6 returning id,name,enabled,version,blocks,trigger_kind as trigger`,[orgId,path[0],name,enabled,JSON.stringify(blocks),body.version,trigger]):
-        await db.query('insert into media_flow(id,org,name,enabled,blocks,trigger_kind) values($1,$2,$3,$4,$5,$6) returning id,name,enabled,version,blocks,trigger_kind as trigger',[randomUUID(),orgId,name,enabled,JSON.stringify(blocks),trigger])
+      if(trigger==='daily'){
+        if(typeof scheduleAsset!=='string')throw new HttpError(400,'Choose an asset for scheduled runs.')
+        const target=await db.query('select id from asset where id=$1 and "organizationId"=$2 and "deletedAt" is null and status=\'ready\'',[scheduleAsset,orgId])
+        if(!target.rowCount)throw new HttpError(404,'Scheduled asset unavailable.')
+      }
+      const result=path.length?await db.query(`update media_flow set name=$3,enabled=$4,blocks=$5,trigger_kind=$7,schedule_asset=$8,next_due=case when $7='daily' then coalesce(next_due,now()+interval '1 day') end,version=version+1,updated=now()
+        where org=$1 and id=$2 and version=$6 returning id,name,enabled,version,blocks,trigger_kind as trigger,schedule_asset as "scheduleAsset"`,[orgId,path[0],name,enabled,JSON.stringify(blocks),body.version,trigger,scheduleAsset]):
+        await db.query(`insert into media_flow(id,org,name,enabled,blocks,trigger_kind,schedule_asset,next_due) values($1,$2,$3,$4,$5,$6,$7,case when $6='daily' then now()+interval '1 day' end) returning id,name,enabled,version,blocks,trigger_kind as trigger,schedule_asset as "scheduleAsset"`,[randomUUID(),orgId,name,enabled,JSON.stringify(blocks),trigger,scheduleAsset])
       if(!result.rows.length) throw new HttpError(409,'The workflow changed. Reopen it before saving.')
       return json({flow:result.rows[0]})
     })
@@ -121,6 +152,7 @@ export async function flowBuilder(req:Request,actor:Actor,path:string[]) {
         if(row.flow!==flow.id || row.asset!==asset.id || row.version!==flow.version) throw new HttpError(409,'Request ID already used.')
         return json(row.result)
       }
+      for(const step of result.steps)if(step.kind==='webhook' && step.status==='complete')await emit(orgId,'workflow.notification',{flowId:flow.id,assetId:asset.id,message:step.detail},db)
       if(result.tags.length!==asset.tags.length) await db.query('update asset set tags=$2,"updatedAt"=now() where id=$1',[asset.id,result.tags])
       await db.query(`insert into media_flow_execution(org,id,flow,version,name,asset,title,result) values($1,$2,$3,$4,$5,$6,$7,$8)`,
         [orgId,body.requestId,flow.id,flow.version,flow.name,asset.id,asset.title,JSON.stringify(result)])
@@ -135,6 +167,13 @@ export async function advanceBuilderUploads(){
   const db=await pool.connect()
   try{
     await db.query('begin')
+    await db.query(`with due as (
+      select f.id,f.schedule_asset from media_flow f join asset a on a.id=f.schedule_asset and a."organizationId"=f.org
+      where f.enabled and f.trigger_kind='daily' and f.next_due<=now() and a.status='ready' and a."deletedAt" is null and a."takenDown" is null
+      order by f.next_due limit 10 for update of f skip locked
+    ), advanced as (
+      update media_flow f set next_due=now()+interval '1 day' from due where f.id=due.id returning f.id,f.schedule_asset,f.version,f.name,f.blocks
+    ) insert into media_flow_pending(flow,asset,version,name,blocks) select * from advanced on conflict do nothing`)
     const {rows}=await db.query(`select p.flow,p.version,p.name,p.blocks,a.id,a.title,a.type,a.tags,a.size,a."organizationId" as org
       from media_flow_pending p join asset a on a.id=p.asset
       where a.status='ready' and a."deletedAt" is null and a."takenDown" is null and not exists
@@ -143,6 +182,7 @@ export async function advanceBuilderUploads(){
     if(rows.length){
       const job=rows[0]
       const result=evaluateFlow(job.blocks,job)
+      for(const step of result.steps)if(step.kind==='webhook' && step.status==='complete')await emit(job.org,'workflow.notification',{flowId:job.flow,assetId:job.id,message:step.detail},db)
       if(result.tags.length!==job.tags.length) await db.query('update asset set tags=$2,"updatedAt"=now() where id=$1',[job.id,result.tags])
       await db.query('insert into media_flow_execution(org,id,flow,version,name,asset,title,result) values($1,$2,$3,$4,$5,$6,$7,$8)',
         [job.org,randomUUID(),job.flow,job.version,job.name,job.id,job.title,JSON.stringify(result)])

@@ -72,9 +72,10 @@ export type KeyScope = (typeof KEY_SCOPES)[number]
 export const KEY_SCOPE_LABEL: Record<KeyScope, string> = { read: 'Read only', upload: 'Upload', publish:'Publish application references', full: 'Full access' }
 export type ApiKey = { id: string; name: string; scope: KeyScope; last4: string; createdAt: string; lastUsedAt: string | null; createdBy: string | null }
 
-export const WEBHOOK_EVENTS = ['asset.ready', 'asset.failed', 'asset.deleted', 'asset.review_required', 'asset.approved', 'asset.rejected', 'asset.captions_ready'] as const
+export const WEBHOOK_EVENTS = ['asset.ready', 'asset.failed', 'asset.deleted', 'asset.review_required', 'asset.approved', 'asset.rejected', 'asset.captions_ready', 'workflow.notification'] as const
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number]
 export const WEBHOOK_EVENT_HELP: Record<WebhookEvent, string> = {
+  'workflow.notification': 'A workflow requested an external notification',
   'asset.ready': 'An upload finished processing and can stream',
   'asset.failed': 'Processing failed',
   'asset.deleted': 'An asset was deleted',

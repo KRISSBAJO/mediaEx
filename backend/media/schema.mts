@@ -290,6 +290,9 @@ create table if not exists flow_agent_usage (
  org text primary key references organization(id) on delete cascade, bucket timestamptz not null, requests integer not null
 );
 alter table media_flow add column if not exists trigger_kind text not null default 'manual';
+alter table media_flow add column if not exists schedule_asset text references asset(id) on delete set null;
+alter table media_flow add column if not exists next_due timestamptz;
+create index if not exists media_flow_due on media_flow(next_due) where enabled and trigger_kind='daily';
 create table if not exists media_flow_pending (
  flow text not null references media_flow(id) on delete cascade, asset text not null references asset(id) on delete cascade,
  version integer not null, name text not null, blocks jsonb not null, primary key(flow,asset)

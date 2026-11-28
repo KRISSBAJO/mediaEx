@@ -73,7 +73,9 @@ try {
   assert.equal((await (await call('workflows/builder/activity')).json()).runs.length,1)
   assert.ok((await pool.query('select tags from asset where id=$1',[first])).rows[0].tags.includes('fixture'))
   assert.equal((await call(builder+'/test','POST',{...input,assetId:'outside'})).status,404)
-  const {advanceBuilderUploads}=await import('../backend/media/flow-builder.mts')
+  const {evaluateFlow,advanceBuilderUploads}=await import('../backend/media/flow-builder.mts')
+  const rendition=evaluateFlow([{kind:'image-preview',value:'640/webp'}],{id:'fixture',type:'image',tags:[],size:'10',title:'demo'})
+  assert.equal(rendition.steps[0].detail,'/api/media/fixture/transform?w=640&f=webp')
   assert.equal((await call(builder,'PUT',{...spec,version:2,trigger:'upload',enabled:true})).status,200)
   const auto=await upload()
   assert.equal((await call(builder,'PUT',{...spec,version:3,trigger:'manual',enabled:false})).status,200)
@@ -81,6 +83,24 @@ try {
   const history=(await (await call('workflows/builder/activity')).json()).runs
   assert.equal(history.filter(row=>row.asset===auto && row.version===3).length,1)
   assert.equal((await (await call('workflows/builder/usage')).json()).usage.executions,2)
+  const daily=await (await call(builder,'PUT',{...spec,enabled:true,version:4,trigger:'daily',scheduleAsset:first,blocks:[
+    {kind:'match-type',value:'image'},{kind:'log',value:'image branch'},{kind:'otherwise'},{kind:'read-tags'},{kind:'end-if'},{kind:'asset-link'}
+  ]})).json()
+  assert.equal(daily.flow?.scheduleAsset,first,JSON.stringify(daily))
+  await pool.query("update media_flow set next_due=now()-interval '1 minute' where id=$1",[saved.flow.id])
+  await advanceBuilderUploads()
+  await advanceBuilderUploads()
+  const scheduled=(await (await call('workflows/builder/activity')).json()).runs.filter(r=>r.version===5)
+  assert.equal(scheduled.length,1)
+  assert.deepEqual(scheduled[0].result.steps.map(s=>s.status),['unmatched','skipped','complete','complete','complete','complete'])
+  // No destinations are subscribed in this fixture.
+  assert.equal((await pool.query('select id from webhook_endpoint')).rowCount,0)
+  const hook=await (await call(builder,'PUT',{...spec,version:5,enabled:true,blocks:[{kind:'webhook',value:'Delivery fixture'}]})).json()
+  assert.equal(hook.flow?.version,6)
+  const outbound={assetId:first,version:6,requestId:randomUUID()}
+  assert.equal((await call(builder+'/test','POST',outbound)).status,200)
+  assert.equal((await call(builder+'/run','POST',outbound)).status,200)
+  assert.equal((await pool.query("select id from webhook_delivery where event='workflow.notification'")).rowCount,0)
   const oldFetch=globalThis.fetch
   try {
     process.env.DEEPSEEK_API_KEY='fixture'

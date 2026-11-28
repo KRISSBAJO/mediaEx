@@ -13,7 +13,7 @@ export async function draftFlow(org:string,provider:unknown,prompt:unknown) {
     on conflict(org) do update set bucket=excluded.bucket, requests=case when flow_agent_usage.bucket=excluded.bucket then flow_agent_usage.requests+1 else 1 end
     where flow_agent_usage.bucket<>excluded.bucket or flow_agent_usage.requests<12 returning requests`,[org])
   if(!quota.rowCount) throw new HttpError(429,'This workspace has used its hourly workflow draft allowance.')
-  const system='Return only a JSON object with name and blocks. Blocks are ordered objects with kind and value strings. Allowed kinds: inspect (empty value), match-type (image, video, audio), match-tag, add-tag, log, notify (in-app only). Conditions skip all remaining blocks if false. No network, deletion, captions, or transformations are available in this builder. If the request cannot be implemented using only those blocks return {"unsupported":true}. Do not invent actions.'
+  const system='You draft MediaEX workflows. Return one JSON object matching this example exactly in shape: {"name":"Review notice","blocks":[{"kind":"inspect","value":""},{"kind":"notify","value":"Ready for review"}]}. Every block has exactly the fields kind and value (both strings). Use only inspect, read-tags, asset-link (empty value), match-type (video, image, audio), match-tag, add-tag (tag name), image-preview (such as 1280/webp), log or notify (nonempty plain text message), otherwise or end-if (empty value). A false condition skips actions until otherwise or end-if. Notify means an internal workflow notification. Never output a destination URL, arbitrary code, credential, or external connector. For any unsupported request return {"unsupported":true}.'
   const claude=provider==='anthropic'
   const url=claude?'https://api.anthropic.com/v1/messages':provider==='openai'?'https://api.openai.com/v1/chat/completions':'https://api.deepseek.com/chat/completions'
   const model=claude?(process.env.ANTHROPIC_MODEL||'claude-haiku-4-5'):(provider==='openai'?(process.env.OPENAI_MODEL||'gpt-4.1-mini'):(process.env.DEEPSEEK_MODEL||'deepseek-flash'))
@@ -33,4 +33,3 @@ export async function draftFlow(org:string,provider:unknown,prompt:unknown) {
   if(!output || output.unsupported) throw new HttpError(422,'This request needs a block that the builder does not support yet.')
   return output
 }
-

@@ -76,13 +76,13 @@ function cleanEvents(v: unknown): WebhookEvent[] {
 type Data = Record<string, unknown>
 
 /** Queues an event for every enabled endpoint in the workspace that subscribed to it. */
-export async function emit(orgId: string, type: WebhookEvent, data: Data) {
-  const { rows } = await pool.query<{ id: string }>(`select id from "webhook_endpoint" where "organizationId" = $1 and enabled and $2 = any(events)`, [orgId, type])
+export async function emit(orgId: string, type: WebhookEvent, data: Data, db: Pick<typeof pool,'query'> = pool) {
+  const { rows } = await db.query<{ id: string }>(`select id from "webhook_endpoint" where "organizationId" = $1 and enabled and $2 = any(events)`, [orgId, type])
   if (!rows.length) return
   const eventId = rid('evt')
   const payload = { id: eventId, type, created: new Date().toISOString(), workspace: orgId, data }
   for (const r of rows) {
-    await pool.query(`insert into "webhook_delivery" (id, "endpointId", "organizationId", event, payload) values ($1, $2, $3, $4, $5)`, [rid('dlv'), r.id, orgId, type, JSON.stringify(payload)])
+    await db.query(`insert into "webhook_delivery" (id, "endpointId", "organizationId", event, payload) values ($1, $2, $3, $4, $5)`, [rid('dlv'), r.id, orgId, type, JSON.stringify(payload)])
   }
   kickDispatcher()
 }
